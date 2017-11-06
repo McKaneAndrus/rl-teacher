@@ -137,6 +137,7 @@ class ParallelRollout(object):
         self.tasks_q.join()
 
         paths = []
+        nominal_path = self.results_q.get()
         for _ in range(num_rollouts):
             path = self.results_q.get()
 
@@ -144,7 +145,8 @@ class ParallelRollout(object):
             #  START REWARD MODIFICATIONS  #
             ################################
             path["original_rewards"] = path["rewards"]
-            path["rewards"] = self.predictor.predict_reward(path)
+            #path["rewards"] = self.predictor.predict_reward(path)
+            path["rewards"] = self.predictor.predict_loss_reward(path, nominal_path)
             self.predictor.path_callback(path)
             ################################
             #   END REWARD MODIFICATIONS   #

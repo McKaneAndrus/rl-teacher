@@ -33,6 +33,11 @@ class TraditionalRLRewardPredictor(object):
         self.agent_logger.log_episode(path)  # <-- This may cause problems in future versions of Teacher.
         return path["original_rewards"]
 
+    def predict_loss_reward(self, path, nominal_path):
+        self.agent_logger.log_episode(path)  # <-- This may cause problems in future versions of Teacher.
+        print("PREDICT_LOSS_RL")
+        return path["original_rewards"]
+
     def path_callback(self, path):
         pass
 
@@ -114,6 +119,7 @@ class ComparisonRewardPredictor():
         segment_reward_pred_left = tf.reduce_sum(self.q_value, axis=1)
         segment_reward_pred_right = tf.reduce_sum(alt_q_value, axis=1)
         reward_logits = tf.stack([segment_reward_pred_left, segment_reward_pred_right], axis=1)  # (batch_size, 2)
+        self.rew_log = tf.nn.softmax(reward_logits)
 
         self.labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="comparison_labels")
 
@@ -122,6 +128,7 @@ class ComparisonRewardPredictor():
 
         data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
 
+        self.data_loss = data_loss
         self.loss_op = tf.reduce_mean(data_loss)
 
         global_step = tf.Variable(0, name='global_step', trainable=False)
@@ -138,6 +145,58 @@ class ComparisonRewardPredictor():
                 K.learning_phase(): False
             })
         return q_value[0]
+
+    def predict_loss_reward(self, path, nominal_path):
+        """Predict the reward for each step in a given path and add the cross entropy loss"""
+        with self.graph.as_default():
+            q_value = self.sess.run(self.q_value, feed_dict={
+                self.segment_obs_placeholder: np.asarray([path["obs"]]),
+                self.segment_act_placeholder: np.asarray([path["actions"]]),
+                K.learning_phase(): False
+            })
+
+            left_obs1 = np.asarray([path["obs"]])
+            left_acts1 = np.asarray([path["actions"]])
+            right_obs1 = np.asarray([nominal_path["obs"]])
+            right_acts1 = np.asarray([nominal_path["actions"]])
+            labels1 = np.asarray([0])
+
+            loss1, reward_logs1 = self.sess.run([self.loss_op, self.rew_log], feed_dict={
+                self.segment_obs_placeholder: left_obs1,
+                self.segment_act_placeholder: left_acts1,
+                self.segment_alt_obs_placeholder: right_obs1,
+                self.segment_alt_act_placeholder: right_acts1,
+                self.labels: labels1,
+                K.learning_phase(): True
+            })
+
+            left_obs2 = np.asarray([path["obs"]])
+            left_acts2 = np.asarray([path["actions"]])
+            right_obs2 = np.asarray([nominal_path["obs"]])
+            right_acts2 = np.asarray([nominal_path["actions"]])
+            labels2 = np.asarray([1])
+
+            loss2, reward_logs2 = self.sess.run([self.loss_op, self.rew_log], feed_dict={
+                self.segment_obs_placeholder: left_obs2,
+                self.segment_act_placeholder: left_acts2,
+                self.segment_alt_obs_placeholder: right_obs2,
+                self.segment_alt_act_placeholder: right_acts2,
+                self.labels: labels2,
+                K.learning_phase(): True
+            })
+
+            print("PREDICT_LOSS_REAL")
+            p1 = reward_logs1[0][0]
+            p2 = reward_logs1[0][1]
+
+            loss = p1*loss1 + p2*loss2
+
+            print(loss)
+            print(p1, p2)
+            print(loss1, loss2)
+            #print(q_value[0].shape)
+        return q_value[0] + loss
+
 
     def path_callback(self, path):
         path_length = len(path["obs"])
