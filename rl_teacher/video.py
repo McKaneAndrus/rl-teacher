@@ -29,6 +29,10 @@ class SegmentVideoRecorder(object):
     def predict_reward(self, path):
         return self.predictor.predict_reward(path)
 
+    def predict_loss_reward(self,path,nominal_path):
+        return self.predictor.predict_loss_reward(path,nominal_path)
+
+
 def write_segment_to_video(segment, fname, env):
     os.makedirs(osp.dirname(fname), exist_ok=True)
     frames = [env.render_full_obs(x) for x in segment["human_obs"]]
