@@ -138,7 +138,7 @@ class ParallelRollout(object):
 
         paths = []
         nominal_path = self.results_q.get()
-        for _ in range(num_rollouts):
+        for _ in range(num_rollouts-1):
             path = self.results_q.get()
 
             ################################
