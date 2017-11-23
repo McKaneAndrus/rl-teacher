@@ -1,8 +1,12 @@
 import numpy as np
 import tensorflow as tf
+import edward as ed
 
 from keras.layers import Dense, Dropout, LeakyReLU
 from keras.models import Sequential
+from edward.models import Normal, Bernoulli
+
+
 
 class FullyConnectedMLP(object):
     """Vanilla two hidden layer multi-layer perceptron"""
