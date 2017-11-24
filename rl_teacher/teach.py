@@ -15,6 +15,7 @@ from rl_teacher.envs import get_timesteps_per_episode
 from rl_teacher.envs import make_with_torque_removed
 from rl_teacher.label_schedules import LabelAnnealer, ConstantLabelSchedule
 from rl_teacher.nn import FullyConnectedMLP
+from rl_teacher.bnn import BNN
 from rl_teacher.segment_sampling import sample_segment_from_path
 from rl_teacher.segment_sampling import segments_from_rand_rollout
 from rl_teacher.summaries import AgentLogger, make_summary_writer
@@ -88,6 +89,19 @@ class ComparisonRewardPredictor():
         # Group the rewards back into their segments
         return tf.reshape(rewards, (batchsize, segment_length))
 
+    def _predict_bnn_rewards(self, obs_segments, act_segments, bayes_nn):
+        batchsize = tf.shape(obs_segments)[0]
+        segment_length = tf.shape(obs_segments)[1]
+
+        obs = tf.reshape(obs_segments, (-1,) + self.obs_shape)
+        acts = tf.reshape(act_segments, (-1,) + self.act_shape)
+
+        flat_obs = tf.contrib.layers.flatten(obs)
+        x = tf.concat([flat_obs, acts], axis=1)
+
+        rewards = bayes_nn.construct_network(x)
+        return tf.reshape(rewards, (batchsize, segment_length))
+
     def _build_model(self):
         """
         Our model takes in path segments with states and actions, and generates Q values.
@@ -110,9 +124,19 @@ class ComparisonRewardPredictor():
 
         # A vanilla multi-layer perceptron maps a (state, action) pair to a reward (Q-value)
         mlp = FullyConnectedMLP(self.obs_shape, self.act_shape)
+        input_dim = np.prod(self.obs_shape) + np.prod(self.act_shape)
+        self.rew_bnn = BNN(input_dim, [64, 64], 1, 5, self.sess, trans_func=tf.nn.relu, out_func=None)
 
-        self.q_value = self._predict_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, mlp)
-        alt_q_value = self._predict_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, mlp)
+        print(self.obs_shape, self.act_shape, "SHAPES")
+
+        # self.q_value = self._predict_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, mlp)
+        # alt_q_value = self._predict_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, mlp)
+
+        self.q_value = self._predict_bnn_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, self.rew_bnn)
+        alt_q_value = self._predict_bnn_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, self.rew_bnn)
+
+        print("Constructed")
+
 
         # We use trajectory segments rather than individual (state, action) pairs because
         # video clips of segments are easier for humans to evaluate
@@ -122,22 +146,25 @@ class ComparisonRewardPredictor():
         self.rew_log = tf.nn.softmax(reward_logits)
 
         self.labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="comparison_labels")
-
         # delta = 1e-5
         # clipped_comparison_labels = tf.clip_by_value(self.comparison_labels, delta, 1.0-delta)
 
-        data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
+        # data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
 
-        self.data_loss = data_loss
-        self.loss_op = tf.reduce_mean(data_loss)
+        # self.data_loss = data_loss
+        # self.loss_op = tf.reduce_mean(data_loss)
+        self.data_loss = self.rew_bnn.loss(segment_reward_pred_left, segment_reward_pred_right, self.labels)
+        print("Constructed2")
+        self.loss_op = tf.reduce_mean(self.data_loss)
 
         global_step = tf.Variable(0, name='global_step', trainable=False)
-        self.train_op = tf.train.AdamOptimizer().minimize(self.loss_op, global_step=global_step)
+        self.train_op = tf.train.AdamOptimizer(learning_rate=0.0001).minimize(self.loss_op, global_step=global_step)
 
         return tf.get_default_graph()
 
     def predict_reward(self, path):
         """Predict the reward for each step in a given path"""
+        self.refresh_weights(self)
         with self.graph.as_default():
             q_value = self.sess.run(self.q_value, feed_dict={
                 self.segment_obs_placeholder: np.asarray([path["obs"]]),
@@ -185,15 +212,15 @@ class ComparisonRewardPredictor():
                 K.learning_phase(): True
             })
 
-            print("PREDICT_LOSS_REAL")
+            #print("PREDICT_LOSS_REAL")
             p1 = reward_logs1[0][0]
             p2 = reward_logs1[0][1]
 
             loss = p1*loss1 + p2*loss2
 
-            print(loss)
-            print(p1, p2)
-            print(loss1, loss2)
+            #print(loss)
+            #print(p1, p2)
+            #print(loss1, loss2)
             #print(q_value[0].shape)
         return q_value[0] + loss
 

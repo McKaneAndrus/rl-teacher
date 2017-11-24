@@ -212,16 +212,21 @@ class BNN():
 
 	def log_p_w_q_w_kl(self):
 		"""KL divergence KL[q_\phi(w)||p(w)]"""
-		return tf.reduce_sum(l.kl_div_new_prior() for l in self.layers)
+		return tf.reduce_sum([l.kl_div_new_prior() for l in self.layers])
 
 	def log_prob_label(self, prediction1, prediction2, target):
-		if target == 0:
-			return tf.log(tf.exp(prediction1)/(tf.exp(prediction2) + tf.exp(prediction1)))
-		else:
-			return tf.log(tf.exp(prediction2)/(tf.exp(prediction2) + tf.exp(prediction1)))
+		reward_logits = tf.stack([prediction1, prediction2], axis=1)
+		return tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=target)
 
 	def pred_sym(self, input_ph):
 		return self.construct_network(input_ph)
+
+	def refresh_weights(self):
+		self.Ws = []
+		self.bs = []
+		for layer in self.layers:
+			self.Ws.append(layer.get_W())
+			self.bs.append(layer.get_b())
 
 	def loss(self, input1_ph, input2_ph, target):
 
@@ -229,8 +234,8 @@ class BNN():
 		_log_p_D_given_w = []
 		for _ in range(self.n_samples):
 			# Make prediction.
-			prediction1 = self.pred_sym(input1_ph)
-			prediction2 = self.pred_sym(input2_ph)
+			prediction1 = input1_ph
+			prediction2 = input2_ph
 			# Calculate model likelihood log(P(D|w)).
 			_log_p_D_given_w.append(self.log_prob_label(
 			    prediction1, prediction2, target))
@@ -291,12 +296,15 @@ class BNN():
 
 	def construct_network(self, input_ph):
 		network = input_ph
+		#print(self.layers)
 		for i in range(len(self.layers)):
 			# Probabilistic layer (1) or deterministic layer (0).
 			l = self.layers[i]
 			l_W = self.Ws[i]
 			l_b = self.bs[i]
+			print(l.non_lin)
 			if l.non_lin:
+				print(network.shape)
 				network = l.non_lin(tf.matmul(network, l_W) + l_b)
 			else:
 				network = tf.matmul(network, l_W) + l_b
