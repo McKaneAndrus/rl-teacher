@@ -149,16 +149,16 @@ class ComparisonRewardPredictor():
         # delta = 1e-5f
         # clipped_comparison_labels = tf.clip_by_value(self.comparison_labels, delta, 1.0-delta)
 
-        # data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
+        self.data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
 
         # self.data_loss = data_loss
         # self.loss_op = tf.reduce_mean(data_loss)
-        self.data_loss = self.rew_bnn.loss(segment_reward_pred_left, segment_reward_pred_right, self.labels)
+        #self.data_loss = self.rew_bnn.loss(segment_reward_pred_left, segment_reward_pred_right, self.labels)
         print("Constructed2")
         self.loss_op = tf.reduce_mean(self.data_loss)
 
         global_step = tf.Variable(0, name='global_step', trainable=False)
-        self.train_op = tf.train.AdamOptimizer(learning_rate=0.0005).minimize(self.loss_op, global_step=global_step)
+        self.train_op = tf.train.AdamOptimizer(learning_rate=0.0001).minimize(self.loss_op, global_step=global_step)
 
         print(self.rew_bnn)
         print(tf.get_default_graph())
@@ -271,7 +271,13 @@ class ComparisonRewardPredictor():
             })
             self._elapsed_predictor_training_iters += 1
             print(loss)
+            #print(self.q_value.eval(feed_dict={self.segment_obs_placeholder: [left_obs[0]],
+            #    self.segment_act_placeholder: [left_acts[0]]}))
+            #print("CHANGED")
+            #print(self.q_value.eval(feed_dict={self.segment_obs_placeholder: [left_obs[0]],
+            #    self.segment_act_placeholder: [left_acts[0]]}))
             self._write_training_summaries(loss)
+
 
     def _write_training_summaries(self, loss):
         self.agent_logger.log_simple("predictor/loss", loss)
@@ -412,3 +418,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

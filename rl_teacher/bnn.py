@@ -72,7 +72,8 @@ class BNNLayer():
 		return W
 
 	def get_W(self):
-		epsilon = np.random.normal(size=self.shape)
+		epsilon = tf.random_normal(shape=self.shape)
+		#print("EPSILON", epsilon)
 		W = self.mu + self.log_to_std(self.rho) * epsilon
 		#W = self.mu
 		self.W = W
@@ -85,7 +86,7 @@ class BNNLayer():
 		return b
 
 	def get_b(self):
-		epsilon = np.random.normal(size=self.num_outputs)
+		epsilon = tf.random_normal(shape=[self.num_outputs])
 		b = self.b_mu + self.log_to_std(self.b_rho) * epsilon
 		#b = self.b_mu
 		self.b = b
@@ -220,7 +221,7 @@ class BNN():
 		print("PREDIUCTION", tf.shape(prediction1))
 		reward_logits = tf.stack([prediction1, prediction2], axis=1)
 		print("LOGIT SHAPE", tf.shape(reward_logits))
-		return tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=target)
+		return tf.log(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=target)+1e-8)
 
 	def _log_prob_normal(self, input, mu=0., sigma=1.):
 		log_normal = -tf.log(sigma) - tf.log(tf.sqrt(2 * np.pi)) - tf.square(input - mu) / (2 * tf.square(sigma))
@@ -243,13 +244,13 @@ class BNN():
 		_log_p_D_given_w = []
 		for _ in range(self.n_samples):
 			# Make prediction.
-			prediction1 = input2_ph
+			prediction1 = input1_ph
 			prediction2 = input2_ph
 			# Calculate model likelihood log(P(D|w)).
-			print("PRED", tf.shape(prediction1))
-			_log_p_D_given_w.append(self.log_prob_label(
-			    prediction1, prediction2, target))
-			self.refresh_weights()
+			prob = self.log_prob_label(prediction1, prediction2, target)
+			print("PROB", prob)
+			_log_p_D_given_w.append(prob)
+			#self.refresh_weights()
 		log_p_D_given_w = tf.reduce_sum(_log_p_D_given_w)
 		# Calculate variational posterior log(q(w)) and prior log(p(w)).
 		kl = self.log_p_w_q_w_kl()
@@ -259,7 +260,7 @@ class BNN():
 
         # Calculate loss function.
 		print("LOSS", kl, log_p_D_given_w)
-		return kl / self.n_batches - log_p_D_given_w / self.n_samples
+		return kl - log_p_D_given_w / self.n_samples
 
 	def loss2(self, input, target):
 
