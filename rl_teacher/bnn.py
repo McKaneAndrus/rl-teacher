@@ -74,6 +74,7 @@ class BNNLayer():
 	def get_W(self):
 		epsilon = np.random.normal(size=self.shape)
 		W = self.mu + self.log_to_std(self.rho) * epsilon
+		#W = self.mu
 		self.W = W
 		return W
 
@@ -86,6 +87,7 @@ class BNNLayer():
 	def get_b(self):
 		epsilon = np.random.normal(size=self.num_outputs)
 		b = self.b_mu + self.log_to_std(self.b_rho) * epsilon
+		#b = self.b_mu
 		self.b = b
 		return b
 
@@ -215,11 +217,19 @@ class BNN():
 		return tf.reduce_sum([l.kl_div_new_prior() for l in self.layers])
 
 	def log_prob_label(self, prediction1, prediction2, target):
+		print("PREDIUCTION", tf.shape(prediction1))
 		reward_logits = tf.stack([prediction1, prediction2], axis=1)
+		print("LOGIT SHAPE", tf.shape(reward_logits))
 		return tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=target)
 
-	def pred_sym(self, input_ph):
-		return self.construct_network(input_ph)
+	def _log_prob_normal(self, input, mu=0., sigma=1.):
+		log_normal = -tf.log(sigma) - tf.log(tf.sqrt(2 * np.pi)) - tf.square(input - mu) / (2 * tf.square(sigma))
+		return tf.reduce_sum(log_normal)
+
+	def pred_sym(self, input_ph, batchsize, segment_length):
+		rewards = self.construct_network(input_ph)
+		tf.reshape(rewards, (batchsize, segment_length))
+		return tf.reduce_sum(rewards, axis=1)
 
 	def refresh_weights(self):
 		self.Ws = []
@@ -229,16 +239,17 @@ class BNN():
 			self.bs.append(layer.get_b())
 
 	def loss(self, input1_ph, input2_ph, target):
-
-        # MC samples.
+		# MC samples.
 		_log_p_D_given_w = []
 		for _ in range(self.n_samples):
 			# Make prediction.
-			prediction1 = input1_ph
+			prediction1 = input2_ph
 			prediction2 = input2_ph
 			# Calculate model likelihood log(P(D|w)).
+			print("PRED", tf.shape(prediction1))
 			_log_p_D_given_w.append(self.log_prob_label(
 			    prediction1, prediction2, target))
+			self.refresh_weights()
 		log_p_D_given_w = tf.reduce_sum(_log_p_D_given_w)
 		# Calculate variational posterior log(q(w)) and prior log(p(w)).
 		kl = self.log_p_w_q_w_kl()
@@ -247,6 +258,23 @@ class BNN():
         #         self.reverse_log_p_w_q_w_kl()
 
         # Calculate loss function.
+		print("LOSS", kl, log_p_D_given_w)
+		return kl / self.n_batches - log_p_D_given_w / self.n_samples
+
+	def loss2(self, input, target):
+
+        # MC samples.
+		_log_p_D_given_w = []
+		for _ in xrange(self.n_samples):
+			# Make prediction.
+			prediction = self.pred_sym(input)
+			# Calculate model likelihood log(P(D|w)).
+			_log_p_D_given_w.append(self._log_prob_normal(target, prediction, self.likelihood_sd))
+		log_p_D_given_w = sum(_log_p_D_given_w)
+		# Calculate variational posterior log(q(w)) and prior log(p(w)).
+		kl = self.log_p_w_q_w_kl()
+
+		# Calculate loss function.
 		return kl / self.n_batches - log_p_D_given_w / self.n_samples
 
 	def loss_last_sample(self, input1, input2, target):
@@ -302,9 +330,7 @@ class BNN():
 			l = self.layers[i]
 			l_W = self.Ws[i]
 			l_b = self.bs[i]
-			print(l.non_lin)
 			if l.non_lin:
-				print(network.shape)
 				network = l.non_lin(tf.matmul(network, l_W) + l_b)
 			else:
 				network = tf.matmul(network, l_W) + l_b

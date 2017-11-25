@@ -125,7 +125,7 @@ class ComparisonRewardPredictor():
         # A vanilla multi-layer perceptron maps a (state, action) pair to a reward (Q-value)
         mlp = FullyConnectedMLP(self.obs_shape, self.act_shape)
         input_dim = np.prod(self.obs_shape) + np.prod(self.act_shape)
-        self.rew_bnn = BNN(input_dim, [64, 64], 1, 5, self.sess, trans_func=tf.nn.relu, out_func=None)
+        self.rew_bnn = BNN(input_dim, [64, 64], 1, 10, self.sess, batch_size=1, trans_func=tf.nn.relu, out_func=None)
 
         print(self.obs_shape, self.act_shape, "SHAPES")
 
@@ -146,7 +146,7 @@ class ComparisonRewardPredictor():
         self.rew_log = tf.nn.softmax(reward_logits)
 
         self.labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="comparison_labels")
-        # delta = 1e-5
+        # delta = 1e-5f
         # clipped_comparison_labels = tf.clip_by_value(self.comparison_labels, delta, 1.0-delta)
 
         # data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
@@ -158,13 +158,15 @@ class ComparisonRewardPredictor():
         self.loss_op = tf.reduce_mean(self.data_loss)
 
         global_step = tf.Variable(0, name='global_step', trainable=False)
-        self.train_op = tf.train.AdamOptimizer(learning_rate=0.0001).minimize(self.loss_op, global_step=global_step)
+        self.train_op = tf.train.AdamOptimizer(learning_rate=0.0005).minimize(self.loss_op, global_step=global_step)
 
+        print(self.rew_bnn)
+        print(tf.get_default_graph())
         return tf.get_default_graph()
 
     def predict_reward(self, path):
         """Predict the reward for each step in a given path"""
-        self.refresh_weights(self)
+        #self.rew_bnn.refresh_weights()
         with self.graph.as_default():
             q_value = self.sess.run(self.q_value, feed_dict={
                 self.segment_obs_placeholder: np.asarray([path["obs"]]),
@@ -268,6 +270,7 @@ class ComparisonRewardPredictor():
                 K.learning_phase(): True
             })
             self._elapsed_predictor_training_iters += 1
+            print(loss)
             self._write_training_summaries(loss)
 
     def _write_training_summaries(self, loss):
