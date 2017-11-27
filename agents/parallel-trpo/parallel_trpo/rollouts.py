@@ -154,10 +154,10 @@ class ParallelRollout(object):
                 self.predictor.path_callback(path)
                 paths.append(path)
 
-
         self.average_timesteps_in_episode = sum([len(path["rewards"]) for path in paths]) / len(paths)
 
         return paths, time() - start_time
+
 
     def set_policy_weights(self, parameters):
         for i in range(self.num_workers):
