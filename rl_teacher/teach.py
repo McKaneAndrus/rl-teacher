@@ -159,11 +159,13 @@ class ComparisonRewardPredictor():
         # delta = 1e-5f
         # clipped_comparison_labels = tf.clip_by_value(self.comparison_labels, delta, 1.0-delta)
 
-        self.data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
+        if self.use_bnn:
+            self.data_loss = self.rew_bnn.loss(segment_reward_pred_left, segment_reward_pred_right, self.labels)
+        else:
+            self.data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
 
         # self.data_loss = data_loss
         # self.loss_op = tf.reduce_mean(data_loss)
-        #self.data_loss = self.rew_bnn.loss(segment_reward_pred_left, segment_reward_pred_right, self.labels)
         print("Constructed2")
         self.loss_op = tf.reduce_mean(self.data_loss)
 
@@ -231,7 +233,7 @@ class ComparisonRewardPredictor():
             p1 = reward_logs1[0][0]
             p2 = reward_logs1[0][1]
 
-            loss = p1*loss1 + p2*loss2
+            loss = p1* loss1 + p2*loss2 # use log to make entropy?
 
             #print(loss)
             #print(p1, p2)

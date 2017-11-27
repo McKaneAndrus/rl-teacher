@@ -219,7 +219,7 @@ class BNN():
 		print("PREDIUCTION", tf.shape(prediction1))
 		reward_logits = tf.stack([prediction1, prediction2], axis=1)
 		print("LOGIT SHAPE", tf.shape(reward_logits))
-		return tf.log(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=target)+1e-8)
+		return tf.log(1.0 - tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=target) +1e-8)
 
 	def _log_prob_normal(self, input, mu=0., sigma=1.):
 		log_normal = -tf.log(sigma) - tf.log(tf.sqrt(2 * np.pi)) - tf.square(input - mu) / (2 * tf.square(sigma))
