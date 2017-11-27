@@ -175,6 +175,9 @@ class ComparisonRewardPredictor():
             })
         return q_value[0]
 
+    def compute_kl_term(self, path1, path2):
+        return
+
     def predict_loss_reward(self, path, nominal_path):
         """Predict the reward for each step in a given path and add the cross entropy loss"""
         with self.graph.as_default():
@@ -270,7 +273,9 @@ class ComparisonRewardPredictor():
                 K.learning_phase(): True
             })
             self._elapsed_predictor_training_iters += 1
-            print(loss)
+            #print(loss)
+            rho = self.rew_bnn.get_rhos()[0].eval()
+            print(rho)
             #print(self.q_value.eval(feed_dict={self.segment_obs_placeholder: [left_obs[0]],
             #    self.segment_act_placeholder: [left_acts[0]]}))
             #print("CHANGED")

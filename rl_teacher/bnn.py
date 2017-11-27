@@ -262,22 +262,6 @@ class BNN():
 		print("LOSS", kl, log_p_D_given_w)
 		return kl - log_p_D_given_w / self.n_samples
 
-	def loss2(self, input, target):
-
-        # MC samples.
-		_log_p_D_given_w = []
-		for _ in xrange(self.n_samples):
-			# Make prediction.
-			prediction = self.pred_sym(input)
-			# Calculate model likelihood log(P(D|w)).
-			_log_p_D_given_w.append(self._log_prob_normal(target, prediction, self.likelihood_sd))
-		log_p_D_given_w = sum(_log_p_D_given_w)
-		# Calculate variational posterior log(q(w)) and prior log(p(w)).
-		kl = self.log_p_w_q_w_kl()
-
-		# Calculate loss function.
-		return kl / self.n_batches - log_p_D_given_w / self.n_samples
-
 	def loss_last_sample(self, input1, input2, target):
 		"""The difference with the original loss is that we only update based on the latest sample.
 		This means that instead of using the prior p(w), we use the previous approximated posterior
