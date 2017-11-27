@@ -13,6 +13,7 @@ class SegmentVideoRecorder(object):
         self.env = env
         self.checkpoint_interval = checkpoint_interval
         self.save_dir = save_dir
+        self.use_loss_greedy = self.predictor.use_loss_greedy
 
         self._num_paths_seen = 0  # Internal counter of how many paths we've seen
         self._counter = 0  # Internal counter of how many videos we've saved at a given iteration.

@@ -45,11 +45,16 @@ class TraditionalRLRewardPredictor(object):
 class ComparisonRewardPredictor():
     """Predictor that trains a model to predict how much reward is contained in a trajectory segment"""
 
-    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule):
+    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn, loss_norm,seed):
         self.summary_writer = summary_writer
         self.agent_logger = agent_logger
         self.comparison_collector = comparison_collector
         self.label_schedule = label_schedule
+        self.use_bnn = use_bnn
+        self.use_loss_greedy = loss_norm is not None
+        self.loss_normalizer = loss_norm
+        self.seed = seed
+
 
         # Set up some bookkeeping
         self.recent_segments = deque(maxlen=200)  # Keep a queue of recently seen segments to pull new comparisons from
@@ -59,6 +64,7 @@ class ComparisonRewardPredictor():
         self._elapsed_predictor_training_iters = 0
 
         # Build and initialize our predictor model
+        tf.set_random_seed(seed)
         config = tf.ConfigProto(
             device_count={'GPU': 0}
         )
@@ -122,18 +128,22 @@ class ComparisonRewardPredictor():
             dtype=tf.float32, shape=(None, None) + self.act_shape, name="alt_act_placeholder")
 
 
-        # A vanilla multi-layer perceptron maps a (state, action) pair to a reward (Q-value)
-        mlp = FullyConnectedMLP(self.obs_shape, self.act_shape)
-        input_dim = np.prod(self.obs_shape) + np.prod(self.act_shape)
-        self.rew_bnn = BNN(input_dim, [64, 64], 1, 10, self.sess, batch_size=1, trans_func=tf.nn.relu, out_func=None)
+
+
 
         print(self.obs_shape, self.act_shape, "SHAPES")
 
-        # self.q_value = self._predict_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, mlp)
-        # alt_q_value = self._predict_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, mlp)
+        if self.use_bnn:
+            input_dim = np.prod(self.obs_shape) + np.prod(self.act_shape)
+            self.rew_bnn = BNN(input_dim, [64, 64], 1, 10, self.sess, batch_size=1, trans_func=tf.nn.relu, out_func=None)
+            self.q_value = self._predict_bnn_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, self.rew_bnn)
+            alt_q_value = self._predict_bnn_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, self.rew_bnn)
+        else:
+            # A vanilla multi-layer perceptron maps a (state, action) pair to a reward (Q-value)
+            mlp = FullyConnectedMLP(self.obs_shape, self.act_shape)
+            self.q_value = self._predict_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, mlp)
+            alt_q_value = self._predict_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, mlp)
 
-        self.q_value = self._predict_bnn_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, self.rew_bnn)
-        alt_q_value = self._predict_bnn_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, self.rew_bnn)
 
         print("Constructed")
 
@@ -160,7 +170,7 @@ class ComparisonRewardPredictor():
         global_step = tf.Variable(0, name='global_step', trainable=False)
         self.train_op = tf.train.AdamOptimizer(learning_rate=0.0001).minimize(self.loss_op, global_step=global_step)
 
-        print(self.rew_bnn)
+        # print(self.rew_bnn)
         print(tf.get_default_graph())
         return tf.get_default_graph()
 
@@ -227,7 +237,7 @@ class ComparisonRewardPredictor():
             #print(p1, p2)
             #print(loss1, loss2)
             #print(q_value[0].shape)
-        return q_value[0] + loss
+        return q_value[0] + loss / self.loss_normalizer
 
 
     def path_callback(self, path):
@@ -274,8 +284,8 @@ class ComparisonRewardPredictor():
             })
             self._elapsed_predictor_training_iters += 1
             #print(loss)
-            rho = self.rew_bnn.get_rhos()[0].eval()
-            print(rho)
+            # rho = self.rew_bnn.get_rhos()[0].eval()
+            # print(rho)
             #print(self.q_value.eval(feed_dict={self.segment_obs_placeholder: [left_obs[0]],
             #    self.segment_act_placeholder: [left_acts[0]]}))
             #print("CHANGED")
@@ -322,6 +332,8 @@ def main():
     parser.add_argument('-a', '--agent', default="parallel_trpo", type=str)
     parser.add_argument('-i', '--pretrain_iters', default=10000, type=int)
     parser.add_argument('-V', '--no_videos', action="store_true")
+    parser.add_argument('-b', '--use_bnn', default=True, type=bool)
+    parser.add_argument('-lg', '--loss_greedy_norm', default=None, type=float)
     args = parser.parse_args()
 
     print("Setting things up...")
@@ -368,6 +380,9 @@ def main():
             comparison_collector=comparison_collector,
             agent_logger=agent_logger,
             label_schedule=label_schedule,
+            use_bnn=args.use_bnn,
+            loss_norm = args.loss_greedy_norm,
+            seed=args.seed
         )
 
         print("Starting random rollouts to generate pretraining segments. No learning will take place...")

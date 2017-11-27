@@ -162,8 +162,7 @@ class BNN():
                  likelihood_sd=5.0,
                  second_order_update=True,
                  learning_rate=0.0001,
-                 information_gain=True,
-                 ):
+                 information_gain=True):
 
 		self.n_in = n_in
 		self.n_hidden = n_hidden
@@ -179,7 +178,6 @@ class BNN():
 		self.learning_rate = learning_rate
 		self.information_gain = information_gain
 		self.sess = session
-
 		assert self.information_gain
 
         # Build network architecture.
@@ -335,7 +333,6 @@ class BNN():
 			kl_components.append(tf.reduce_sum(tf.square(step_size) * tf.square(grad) * invH))
 		for j in range(len(rhos)):
 			grad = grads_rho[j]
-			old_rho = rho_olds[j]
 			rho = rhos[j]
 			H = 2.0 * (tf.exp(2.0 * rho)) / (1.0 + tf.exp(rho))**2.0 / (tf.log(1 + tf.exp(rho))**2)
 			invH = 1.0 / H

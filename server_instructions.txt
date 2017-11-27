@@ -1,0 +1,40 @@
+# 3 separate terminals
+gcloud compute ssh --ssh-flag="-X" rl-teacher
+1. Xdummy
+2. [screen] && py35 && python human-feedback-api/manage.py runserver 0.0.0.0:8783
+3. [screen] && py35 && DISPLAY=:0 python rl_teacher/teach.py 
+	-p human --pretrain_labels 100 -e Ant-v1 -n ant10 -w 8
+	-p synth -l 1400 -e ShortHopper-v1 -n syn-1400 -w 8
+# Tunnel terminal
+ssh -L 8783:localhost:8783 mckane@[35.197.126.56]
+
+-------- Iteration 1 ----------
+Average sum of true rewards per episode:     173.4225
+Entropy:                                     4.2796
+KL(old|new):                                 0.0008
+Surrogate loss:                             -0.0021
+Frames gathered:                          2400     
+Frames gathered/second:                    936     
+Time spent gathering rollouts:               2.56  
+Time spent updating weights:                 1.47  
+Total time:                                  4.05  
+-------- Iteration 2 ----------
+Average sum of true rewards per episode:     105.2274
+Entropy:                                     4.2840
+KL(old|new):                                 0.0008
+Surrogate loss:                             -0.0012
+Frames gathered:                          7800     
+Frames gathered/second:                   3924     
+Time spent gathering rollouts:               1.99  
+Time spent updating weights:                 2.19  
+Total time:                                  8.24  
+-------- Iteration 3 ----------
+Average sum of true rewards per episode:      99.3534
+Entropy:                                     4.2761
+KL(old|new):                                 0.0007
+Surrogate loss:                             -0.0009
+Frames gathered:                          7800     
+Frames gathered/second:                   3766     
+Time spent gathering rollouts:               2.07  
+Time spent updating weights:                 2.54  
+Total time:                                 12.86 

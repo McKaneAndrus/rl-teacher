@@ -1,10 +1,8 @@
 import numpy as np
 import tensorflow as tf
-import edward as ed
 
 from keras.layers import Dense, Dropout, LeakyReLU
 from keras.models import Sequential
-from edward.models import Normal, Bernoulli
 
 
 
