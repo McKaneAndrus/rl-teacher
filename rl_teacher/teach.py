@@ -42,12 +42,13 @@ class TraditionalRLRewardPredictor(object):
 class ComparisonRewardPredictor():
     """Predictor that trains a model to predict how much reward is contained in a trajectory segment"""
 
-    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn, entropy_alpha,seed):
+    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn, use_vi, entropy_alpha,seed):
         self.summary_writer = summary_writer
         self.agent_logger = agent_logger
         self.comparison_collector = comparison_collector
         self.label_schedule = label_schedule
         self.use_bnn = use_bnn
+        self.use_vi = use_vi
         self.use_entropy = entropy_alpha is not None
         self.entropy_alpha = entropy_alpha
         self.seed = seed
@@ -158,7 +159,7 @@ class ComparisonRewardPredictor():
         # delta = 1e-5f
         # clipped_comparison_labels = tf.clip_by_value(self.comparison_labels, delta, 1.0-delta)
 
-        if self.use_bnn:
+        if self.use_bnn and self.use_vi:
             self.data_loss = self.rew_bnn.loss(segment_reward_pred_left, segment_reward_pred_right, self.labels)
         else:
             self.data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
@@ -278,6 +279,7 @@ def main():
     parser.add_argument('-i', '--pretrain_iters', default=10000, type=int)
     parser.add_argument('-V', '--no_videos', action="store_true")
     parser.add_argument('-b', '--use_bnn', default=True, type=bool)
+    parser.add_argument('-vi', '--use_vi', default=True, type=bool)
     parser.add_argument('-E', '--entropy_alpha', default=None, type=float)
     parser.add_argument('-nb', '--num_bnn_samples', default=10, type=int)
     args = parser.parse_args()
@@ -327,6 +329,7 @@ def main():
             agent_logger=agent_logger,
             label_schedule=label_schedule,
             use_bnn=args.use_bnn,
+            use_vi = args.use_vi,
             entropy_alpha = args.entropy_alpha,
             seed=args.seed
         )
