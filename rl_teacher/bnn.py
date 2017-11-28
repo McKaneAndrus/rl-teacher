@@ -237,6 +237,7 @@ class BNN():
 			self.Ws.append(layer.get_W())
 			self.bs.append(layer.get_b())
 
+
 	def loss(self, input1_ph, input2_ph, target):
 		# MC samples.
 		_log_p_D_given_w = []
@@ -319,6 +320,14 @@ class BNN():
 				network = tf.matmul(network, l_W) + l_b
 
 		return network
+
+	def sample_network(self, network_output):
+		preds = []
+		for _ in range(self.n_samples):
+			# Make prediction.
+			prediction = network_output
+			preds.append(prediction)
+		return preds
 
 	def fast_kl_div(self, loss, mus, rhos, mu_olds, rho_olds, step_size):
 

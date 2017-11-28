@@ -136,23 +136,24 @@ class ParallelRollout(object):
             self.tasks_q.put("do_rollout")
         self.tasks_q.join()
 
-        if self.predictor.use_loss_greedy:
-            paths = []
-            nominal_path = self.results_q.get()
-            for _ in range(num_rollouts-1):
-                path = self.results_q.get()
-                path["original_rewards"] = path["rewards"]
-                path["rewards"] = self.predictor.predict_loss_reward(path, nominal_path)
-                self.predictor.path_callback(path)
-                paths.append(path)
-        else:
-            paths = []
-            for _ in range(num_rollouts):
-                path = self.results_q.get()
-                path["original_rewards"] = path["rewards"]
-                path["rewards"] = self.predictor.predict_reward(path)
-                self.predictor.path_callback(path)
-                paths.append(path)
+        paths, mean_rewards = [], []
+        for _ in range(num_rollouts):
+            path = self.results_q.get()
+            path["original_rewards"] = path["rewards"]
+            path["rewards"] = self.predictor.predict_reward(path)
+            self.predictor.path_callback(path)
+            paths.append(path)
+            if self.predictor.use_entropy:
+                mean_rewards += [path["rewards"].mean()]
+
+        if self.predictor.use_entropy:
+            mean_rewards = np.array(mean_rewards)
+            for i in range(num_rollouts):
+                logits = np.exp(np.stack([np.delete(mean_rewards, i),np.ones(num_rollouts-1) * mean_rewards[i]]))
+                probs = (logits / (np.sum(logits, axis=0)+ 1e-12))
+                average_entropy = (- probs * np.log(probs)).sum(axis=0).mean()
+                paths[i]["rewards"] += self.predictor.entropy_alpha * average_entropy/len(paths[i]["rewards"])
+
 
         self.average_timesteps_in_episode = sum([len(path["rewards"]) for path in paths]) / len(paths)
 

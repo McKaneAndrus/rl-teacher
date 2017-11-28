@@ -22,6 +22,8 @@ from rl_teacher.summaries import AgentLogger, make_summary_writer
 from rl_teacher.utils import slugify, corrcoef
 from rl_teacher.video import SegmentVideoRecorder
 
+from tensorflow.python import debug as tf_debug
+
 CLIP_LENGTH = 1.5
 
 class TraditionalRLRewardPredictor(object):
@@ -34,26 +36,22 @@ class TraditionalRLRewardPredictor(object):
         self.agent_logger.log_episode(path)  # <-- This may cause problems in future versions of Teacher.
         return path["original_rewards"]
 
-    def predict_loss_reward(self, path, nominal_path):
-        self.agent_logger.log_episode(path)  # <-- This may cause problems in future versions of Teacher.
-        print("PREDICT_LOSS_RL")
-        return path["original_rewards"]
-
     def path_callback(self, path):
         pass
 
 class ComparisonRewardPredictor():
     """Predictor that trains a model to predict how much reward is contained in a trajectory segment"""
 
-    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn, loss_norm,seed):
+    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn, entropy_alpha,seed):
         self.summary_writer = summary_writer
         self.agent_logger = agent_logger
         self.comparison_collector = comparison_collector
         self.label_schedule = label_schedule
         self.use_bnn = use_bnn
-        self.use_loss_greedy = loss_norm is not None
-        self.loss_normalizer = loss_norm
+        self.use_entropy = entropy_alpha is not None
+        self.entropy_alpha = entropy_alpha
         self.seed = seed
+        random.seed(seed)
 
 
         # Set up some bookkeeping
@@ -69,6 +67,7 @@ class ComparisonRewardPredictor():
             device_count={'GPU': 0}
         )
         self.sess = tf.InteractiveSession(config=config)
+        # self.sess = tf_debug.LocalCLIDebugWrapperSession(self.sess)
         self.obs_shape = env.observation_space.shape
         self.discrete_action_space = not hasattr(env.action_space, "shape")
         self.act_shape = (env.action_space.n,) if self.discrete_action_space else env.action_space.shape
@@ -105,8 +104,15 @@ class ComparisonRewardPredictor():
         flat_obs = tf.contrib.layers.flatten(obs)
         x = tf.concat([flat_obs, acts], axis=1)
 
-        rewards = bayes_nn.construct_network(x)
-        return tf.reshape(rewards, (batchsize, segment_length))
+
+        # rewards = bayes_nn.construct_network(x)
+        # rewards = tf.reshape(rewards, (batchsize, segment_length))
+
+        # TODO make bayes_nn.run method
+        network = bayes_nn.construct_network(x)
+        network = tf.reshape(network, (batchsize, segment_length))
+        rewards = tf.reduce_mean(bayes_nn.sample_network(network), axis=0)
+        return rewards
 
     def _build_model(self):
         """
@@ -127,10 +133,6 @@ class ComparisonRewardPredictor():
         self.segment_alt_act_placeholder = tf.placeholder(
             dtype=tf.float32, shape=(None, None) + self.act_shape, name="alt_act_placeholder")
 
-
-
-
-
         print(self.obs_shape, self.act_shape, "SHAPES")
 
         if self.use_bnn:
@@ -144,16 +146,13 @@ class ComparisonRewardPredictor():
             self.q_value = self._predict_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, mlp)
             alt_q_value = self._predict_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, mlp)
 
-
         print("Constructed")
-
 
         # We use trajectory segments rather than individual (state, action) pairs because
         # video clips of segments are easier for humans to evaluate
         segment_reward_pred_left = tf.reduce_sum(self.q_value, axis=1)
         segment_reward_pred_right = tf.reduce_sum(alt_q_value, axis=1)
         reward_logits = tf.stack([segment_reward_pred_left, segment_reward_pred_right], axis=1)  # (batch_size, 2)
-        self.rew_log = tf.nn.softmax(reward_logits)
 
         self.labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="comparison_labels")
         # delta = 1e-5f
@@ -164,8 +163,6 @@ class ComparisonRewardPredictor():
         else:
             self.data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
 
-        # self.data_loss = data_loss
-        # self.loss_op = tf.reduce_mean(data_loss)
         print("Constructed2")
         self.loss_op = tf.reduce_mean(self.data_loss)
 
@@ -178,7 +175,6 @@ class ComparisonRewardPredictor():
 
     def predict_reward(self, path):
         """Predict the reward for each step in a given path"""
-        #self.rew_bnn.refresh_weights()
         with self.graph.as_default():
             q_value = self.sess.run(self.q_value, feed_dict={
                 self.segment_obs_placeholder: np.asarray([path["obs"]]),
@@ -189,58 +185,6 @@ class ComparisonRewardPredictor():
 
     def compute_kl_term(self, path1, path2):
         return
-
-    def predict_loss_reward(self, path, nominal_path):
-        """Predict the reward for each step in a given path and add the cross entropy loss"""
-        with self.graph.as_default():
-            q_value = self.sess.run(self.q_value, feed_dict={
-                self.segment_obs_placeholder: np.asarray([path["obs"]]),
-                self.segment_act_placeholder: np.asarray([path["actions"]]),
-                K.learning_phase(): False
-            })
-
-            left_obs1 = np.asarray([path["obs"]])
-            left_acts1 = np.asarray([path["actions"]])
-            right_obs1 = np.asarray([nominal_path["obs"]])
-            right_acts1 = np.asarray([nominal_path["actions"]])
-            labels1 = np.asarray([0])
-
-            loss1, reward_logs1 = self.sess.run([self.loss_op, self.rew_log], feed_dict={
-                self.segment_obs_placeholder: left_obs1,
-                self.segment_act_placeholder: left_acts1,
-                self.segment_alt_obs_placeholder: right_obs1,
-                self.segment_alt_act_placeholder: right_acts1,
-                self.labels: labels1,
-                K.learning_phase(): True
-            })
-
-            left_obs2 = np.asarray([path["obs"]])
-            left_acts2 = np.asarray([path["actions"]])
-            right_obs2 = np.asarray([nominal_path["obs"]])
-            right_acts2 = np.asarray([nominal_path["actions"]])
-            labels2 = np.asarray([1])
-
-            loss2, reward_logs2 = self.sess.run([self.loss_op, self.rew_log], feed_dict={
-                self.segment_obs_placeholder: left_obs2,
-                self.segment_act_placeholder: left_acts2,
-                self.segment_alt_obs_placeholder: right_obs2,
-                self.segment_alt_act_placeholder: right_acts2,
-                self.labels: labels2,
-                K.learning_phase(): True
-            })
-
-            #print("PREDICT_LOSS_REAL")
-            p1 = reward_logs1[0][0]
-            p2 = reward_logs1[0][1]
-
-            loss = p1* loss1 + p2*loss2 # use log to make entropy?
-
-            #print(loss)
-            #print(p1, p2)
-            #print(loss1, loss2)
-            #print(q_value[0].shape)
-        return q_value[0] + loss / self.loss_normalizer
-
 
     def path_callback(self, path):
         path_length = len(path["obs"])
@@ -255,9 +199,8 @@ class ComparisonRewardPredictor():
 
         # If we need more comparisons, then we build them from our recent segments
         if len(self.comparison_collector) < int(self.label_schedule.n_desired_labels):
-            self.comparison_collector.add_segment_pair(
-                random.choice(self.recent_segments),
-                random.choice(self.recent_segments))
+            segments = random.sample(self.recent_segments, 2)
+            self.comparison_collector.add_segment_pair(segments[0], segments[1])
 
         # Train our predictor every X steps
         if self._steps_since_last_training >= int(self._n_timesteps_per_predictor_training):
@@ -335,7 +278,8 @@ def main():
     parser.add_argument('-i', '--pretrain_iters', default=10000, type=int)
     parser.add_argument('-V', '--no_videos', action="store_true")
     parser.add_argument('-b', '--use_bnn', default=True, type=bool)
-    parser.add_argument('-lg', '--loss_greedy_norm', default=None, type=float)
+    parser.add_argument('-E', '--entropy_alpha', default=None, type=float)
+    parser.add_argument('-nb', '--num_bnn_samples', default=10, type=int)
     args = parser.parse_args()
 
     print("Setting things up...")
@@ -383,7 +327,7 @@ def main():
             agent_logger=agent_logger,
             label_schedule=label_schedule,
             use_bnn=args.use_bnn,
-            loss_norm = args.loss_greedy_norm,
+            entropy_alpha = args.entropy_alpha,
             seed=args.seed
         )
 
