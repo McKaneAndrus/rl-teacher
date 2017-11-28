@@ -167,7 +167,7 @@ class ComparisonRewardPredictor():
         self.loss_op = tf.reduce_mean(self.data_loss)
 
         global_step = tf.Variable(0, name='global_step', trainable=False)
-        self.train_op = tf.train.AdamOptimizer(learning_rate=0.0001).minimize(self.loss_op, global_step=global_step)
+        self.train_op = tf.train.AdamOptimizer().minimize(self.loss_op, global_step=global_step)
 
         # print(self.rew_bnn)
         print(tf.get_default_graph())
