@@ -73,7 +73,6 @@ class BNNLayer():
 
 	def get_W(self):
 		epsilon = tf.random_normal(shape=self.shape)
-		#print("EPSILON", epsilon)
 		W = self.mu + self.log_to_std(self.rho) * epsilon
 		#W = self.mu
 		self.W = W
@@ -216,9 +215,7 @@ class BNN():
 		return tf.reduce_sum([l.kl_div_new_prior() for l in self.layers])
 
 	def log_prob_label(self, prediction1, prediction2, target):
-		print("PREDIUCTION", tf.shape(prediction1))
 		reward_logits = tf.stack([prediction1, prediction2], axis=1)
-		print("LOGIT SHAPE", tf.shape(reward_logits))
 		return -tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=target)
 
 	def _log_prob_normal(self, input, mu=0., sigma=1.):
@@ -247,7 +244,6 @@ class BNN():
 			prediction2 = input2_ph
 			# Calculate model likelihood log(P(D|w)).
 			prob = self.log_prob_label(prediction1, prediction2, target)
-			print("PROB", prob)
 			_log_p_D_given_w.append(prob)
 			#self.refresh_weights()
 		log_p_D_given_w = tf.reduce_sum(_log_p_D_given_w)
@@ -258,7 +254,6 @@ class BNN():
         #         self.reverse_log_p_w_q_w_kl()
 
         # Calculate loss function.
-		print("LOSS", kl, log_p_D_given_w)
 		return kl - log_p_D_given_w / self.n_samples
 
 	def loss_last_sample(self, input1, input2, target):
@@ -308,7 +303,6 @@ class BNN():
 
 	def construct_network(self, input_ph):
 		network = input_ph
-		#print(self.layers)
 		for i in range(len(self.layers)):
 			# Probabilistic layer (1) or deterministic layer (0).
 			l = self.layers[i]
