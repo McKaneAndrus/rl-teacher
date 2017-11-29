@@ -43,7 +43,7 @@ class ComparisonRewardPredictor():
     """Predictor that trains a model to predict how much reward is contained in a trajectory segment"""
 
     def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule,
-                 use_bnn, use_vi, bnn_samples, entropy_alpha, trajectory_splits, seed):
+                 use_bnn, use_vi, bnn_samples, entropy_alpha, trajectory_splits, seed, info_gain_samples):
         self.summary_writer = summary_writer
         self.agent_logger = agent_logger
         self.comparison_collector = comparison_collector
@@ -58,6 +58,10 @@ class ComparisonRewardPredictor():
             print("Using entropy-seeking bonuses")
         self.entropy_alpha = entropy_alpha
         self.trajectory_splits = trajectory_splits
+        self.use_info_gain = info_gain_samples is not None
+        self.info_gain_samples = info_gain_samples
+        if self.use_info_gain:
+            assert(self.use_bnn)
         self.seed = seed
         random.seed(seed)
 
@@ -162,11 +166,13 @@ class ComparisonRewardPredictor():
         # video clips of segments are easier for humans to evaluate
         segment_reward_pred_left = tf.reduce_sum(self.q_value, axis=1)
         segment_reward_pred_right = tf.reduce_sum(alt_q_value, axis=1)
-        segment_reward_mean_left = tf.reduce_mean(self.q_value, axis=1)
-        segment_reward_mean_right = tf.reduce_mean(alt_q_value, axis=1)
-        self.mean_rew_logits = tf.stack([segment_reward_mean_left, segment_reward_mean_right], axis=1)
-        self.softmax_rew = tf.nn.softmax(self.mean_rew_logits)
         reward_logits = tf.stack([segment_reward_pred_left, segment_reward_pred_right], axis=1)  # (batch_size, 2)
+
+        if self.use_info_gain:
+            segment_reward_mean_left = tf.reduce_mean(self.q_value, axis=1)
+            segment_reward_mean_right = tf.reduce_mean(alt_q_value, axis=1)
+            self.mean_rew_logits = tf.stack([segment_reward_mean_left, segment_reward_mean_right], axis=1)
+            self.softmax_rew = tf.nn.softmax(self.mean_rew_logits)
 
         self.labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="comparison_labels")
         # delta = 1e-5f
@@ -183,11 +189,12 @@ class ComparisonRewardPredictor():
         global_step = tf.Variable(0, name='global_step', trainable=False)
         self.train_op = tf.train.AdamOptimizer().minimize(self.loss_op, global_step=global_step)
 
-        self.plan_labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="plan_labels")
-        self.planning_loss = self.rew_bnn.loss_last_sample(segment_reward_mean_left, segment_reward_mean_right,
+        if self.use_info_gain:
+            self.plan_labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="plan_labels")
+            self.planning_loss = self.rew_bnn.loss_last_sample(segment_reward_mean_left, segment_reward_mean_right,
                                                            self.plan_labels)
-        self.planning_kl = self.rew_bnn.fast_kl_div(self.planning_loss, self.rew_bnn.get_mus(), self.rew_bnn.get_rhos(),
-                                                    0.01)
+            self.planning_kl = self.rew_bnn.fast_kl_div(self.planning_loss, self.rew_bnn.get_mus(),
+                                                        self.rew_bnn.get_rhos(), 0.01)
 
 
         print("Constructed Training Ops")
@@ -219,66 +226,68 @@ class ComparisonRewardPredictor():
             self.recent_segments.append(segment)
 
         # If we need more comparisons, then we build them from our recent segments
-        best_kl = float("-inf")
-        best_a = 0
-        best_b = 0
-        pair_indices = np.random.randint(low=0, high=len(self.recent_segments), size=(100,2))
-        for i in range(len(pair_indices)):
-            a = pair_indices[i][0]
-            b = pair_indices[i][1]
-            if a == b:
-                continue
-            else:
-                with self.graph.as_default():
-                    seg1_obs = self.recent_segments[a]["obs"]
-                    seg2_obs = self.recent_segments[b]["obs"]
-                    seg1_acts = self.recent_segments[a]["actions"]
-                    seg2_acts = self.recent_segments[b]["actions"]
-                    kl1 = self.sess.run([self.planning_kl],
-                        feed_dict={
-                        self.segment_obs_placeholder: [seg1_obs],
-                        self.segment_act_placeholder: [seg1_acts],
-                        self.segment_alt_obs_placeholder: [seg2_obs],
-                        self.segment_alt_act_placeholder: [seg2_acts],
-                        self.plan_labels: [0],
-                        K.learning_phase(): False
-                        })
-                    kl2 = self.sess.run([self.planning_kl],
-                        feed_dict={
-                        self.segment_obs_placeholder: [seg1_obs],
-                        self.segment_act_placeholder: [seg1_acts],
-                        self.segment_alt_obs_placeholder: [seg2_obs],
-                        self.segment_alt_act_placeholder: [seg2_acts],
-                        self.plan_labels: [1],
-                        K.learning_phase(): False
-                        })
-                    rew = self.sess.run([self.softmax_rew],
-                        feed_dict={
-                        self.segment_obs_placeholder: [seg1_obs],
-                        self.segment_act_placeholder: [seg1_acts],
-                        self.segment_alt_obs_placeholder: [seg2_obs],
-                        self.segment_alt_act_placeholder: [seg2_acts],
-                        K.learning_phase(): False
-                        })
-                    p1 = rew[0][0][0]
-                    p2 = rew[0][0][1]
-                    kl1 = kl1[0]
-                    kl2 = kl2[0]
-                    #print("rewards ", p1, p2)
-                    #print("kls ", kl1, kl2)
-                    kl_val = p1*kl1 + p2*kl2
-                    #print("KL: ", kl_val)
-                    if kl_val > best_kl:
-                        best_kl = kl_val
-                        best_a = a
-                        best_b = b
-        print("bestKL", best_kl, best_a, best_b)
+        if self.use_info_gain:
+            best_kl = float("-inf")
+            best_a = 0
+            best_b = 0
+            pair_indices = np.random.randint(low=0, high=len(self.recent_segments), size=(self.info_gain_samples,2))
+            for i in range(len(pair_indices)):
+                a = pair_indices[i][0]
+                b = pair_indices[i][1]
+                if a == b:
+                    continue
+                else:
+                    with self.graph.as_default():
+                        seg1_obs = self.recent_segments[a]["obs"]
+                        seg2_obs = self.recent_segments[b]["obs"]
+                        seg1_acts = self.recent_segments[a]["actions"]
+                        seg2_acts = self.recent_segments[b]["actions"]
+                        kl1 = self.sess.run([self.planning_kl],
+                            feed_dict={
+                            self.segment_obs_placeholder: [seg1_obs],
+                            self.segment_act_placeholder: [seg1_acts],
+                            self.segment_alt_obs_placeholder: [seg2_obs],
+                            self.segment_alt_act_placeholder: [seg2_acts],
+                            self.plan_labels: [0],
+                            K.learning_phase(): False
+                            })
+                        kl2 = self.sess.run([self.planning_kl],
+                            feed_dict={
+                            self.segment_obs_placeholder: [seg1_obs],
+                            self.segment_act_placeholder: [seg1_acts],
+                            self.segment_alt_obs_placeholder: [seg2_obs],
+                            self.segment_alt_act_placeholder: [seg2_acts],
+                            self.plan_labels: [1],
+                            K.learning_phase(): False
+                            })
+                        rew = self.sess.run([self.softmax_rew],
+                            feed_dict={
+                            self.segment_obs_placeholder: [seg1_obs],
+                            self.segment_act_placeholder: [seg1_acts],
+                            self.segment_alt_obs_placeholder: [seg2_obs],
+                            self.segment_alt_act_placeholder: [seg2_acts],
+                            K.learning_phase(): False
+                            })
+                        p1 = rew[0][0][0]
+                        p2 = rew[0][0][1]
+                        kl1 = kl1[0]
+                        kl2 = kl2[0]
+                        #print("rewards ", p1, p2)
+                        #print("kls ", kl1, kl2)
+                        kl_val = p1*kl1 + p2*kl2
+                        #print("KL: ", kl_val)
+                        if kl_val > best_kl:
+                            best_kl = kl_val
+                            best_a = a
+                            best_b = b
+            print("bestKL", best_kl, best_a, best_b)
+            segments = [self.recent_segments[best_a], self.recent_segments[best_b]]
+        else:
+            segments = random.sample(self.recent_segments, 2) if len(self.recent_segments) > 2 else None
+
+
         if len(self.comparison_collector) < int(self.label_schedule.n_desired_labels):
-            # segments = random.sample(self.recent_segments, 2)
-            # self.comparison_collector.add_segment_pair(segments[0], segments[1])
-            self.comparison_collector.add_segment_pair(
-                self.recent_segments[best_a],
-                self.recent_segments[best_b])
+            self.comparison_collector.add_segment_pair(segments[0], segments[1])
 
         # Train our predictor every X steps
         if self._steps_since_last_training >= int(self._n_timesteps_per_predictor_training):
@@ -352,6 +361,7 @@ def main():
     parser.add_argument('-E', '--entropy_alpha', default=None, type=float)
     parser.add_argument('-nb', '--num_bnn_samples', default=10, type=int)
     parser.add_argument('-ts', '--trajectory_splits', default=10, type=int)
+    parser.add_argument('-ig', '--info_gain_samples', default=None, type=int)
     args = parser.parse_args()
 
     print("Setting things up...")
@@ -403,6 +413,7 @@ def main():
             bnn_samples = args.num_bnn_samples,
             entropy_alpha = args.entropy_alpha,
             trajectory_splits = args.trajectory_splits,
+            info_gain_samples=args.info_gain_samples,
             seed=args.seed
         )
 
