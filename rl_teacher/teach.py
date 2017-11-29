@@ -42,15 +42,18 @@ class TraditionalRLRewardPredictor(object):
 class ComparisonRewardPredictor():
     """Predictor that trains a model to predict how much reward is contained in a trajectory segment"""
 
-    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn, use_vi, entropy_alpha,seed):
+    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule,
+                 use_bnn, use_vi, bnn_samples, entropy_alpha, trajectory_splits, seed):
         self.summary_writer = summary_writer
         self.agent_logger = agent_logger
         self.comparison_collector = comparison_collector
         self.label_schedule = label_schedule
         self.use_bnn = use_bnn
         self.use_vi = use_vi
+        self.bnn_samples = bnn_samples
         self.use_entropy = entropy_alpha is not None
         self.entropy_alpha = entropy_alpha
+        self.trajectory_splits = trajectory_splits
         self.seed = seed
         random.seed(seed)
 
@@ -134,11 +137,12 @@ class ComparisonRewardPredictor():
         self.segment_alt_act_placeholder = tf.placeholder(
             dtype=tf.float32, shape=(None, None) + self.act_shape, name="alt_act_placeholder")
 
-        print(self.obs_shape, self.act_shape, "SHAPES")
 
         if self.use_bnn:
+            print("Using BNN")
             input_dim = np.prod(self.obs_shape) + np.prod(self.act_shape)
-            self.rew_bnn = BNN(input_dim, [64, 64], 1, 10, self.sess, batch_size=1, trans_func=tf.nn.relu, out_func=None)
+            self.rew_bnn = BNN(input_dim, [64, 64], 1, 10, self.sess, batch_size=1, trans_func=tf.nn.relu,
+                               n_samples=self.bnn_samples, out_func=None)
             self.q_value = self._predict_bnn_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, self.rew_bnn)
             alt_q_value = self._predict_bnn_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, self.rew_bnn)
         else:
@@ -147,7 +151,7 @@ class ComparisonRewardPredictor():
             self.q_value = self._predict_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, mlp)
             alt_q_value = self._predict_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, mlp)
 
-        print("Constructed")
+        print("Constructed Reward Model")
 
         # We use trajectory segments rather than individual (state, action) pairs because
         # video clips of segments are easier for humans to evaluate
@@ -160,18 +164,18 @@ class ComparisonRewardPredictor():
         # clipped_comparison_labels = tf.clip_by_value(self.comparison_labels, delta, 1.0-delta)
 
         if self.use_bnn and self.use_vi:
+            print("Using VI to train BNNN")
             self.data_loss = self.rew_bnn.loss(segment_reward_pred_left, segment_reward_pred_right, self.labels)
         else:
             self.data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
 
-        print("Constructed2")
         self.loss_op = tf.reduce_mean(self.data_loss)
 
         global_step = tf.Variable(0, name='global_step', trainable=False)
         self.train_op = tf.train.AdamOptimizer().minimize(self.loss_op, global_step=global_step)
 
-        # print(self.rew_bnn)
-        print(tf.get_default_graph())
+        print("Constructed Training Ops")
+
         return tf.get_default_graph()
 
     def predict_reward(self, path):
@@ -229,14 +233,6 @@ class ComparisonRewardPredictor():
                 K.learning_phase(): True
             })
             self._elapsed_predictor_training_iters += 1
-            #print(loss)
-            # rho = self.rew_bnn.get_rhos()[0].eval()
-            # print(rho)
-            #print(self.q_value.eval(feed_dict={self.segment_obs_placeholder: [left_obs[0]],
-            #    self.segment_act_placeholder: [left_acts[0]]}))
-            #print("CHANGED")
-            #print(self.q_value.eval(feed_dict={self.segment_obs_placeholder: [left_obs[0]],
-            #    self.segment_act_placeholder: [left_acts[0]]}))
             self._write_training_summaries(loss)
 
 
@@ -278,10 +274,11 @@ def main():
     parser.add_argument('-a', '--agent', default="parallel_trpo", type=str)
     parser.add_argument('-i', '--pretrain_iters', default=10000, type=int)
     parser.add_argument('-V', '--no_videos', action="store_true")
-    parser.add_argument('-b', '--use_bnn', default=True, type=bool)
+    parser.add_argument('-b', '--use_bnn', default=False, type=bool)
     parser.add_argument('-vi', '--use_vi', default=True, type=bool)
     parser.add_argument('-E', '--entropy_alpha', default=None, type=float)
     parser.add_argument('-nb', '--num_bnn_samples', default=10, type=int)
+    parser.add_argument('-ts', '--trajectory_splits', default=10, type=int)
     args = parser.parse_args()
 
     print("Setting things up...")
@@ -330,7 +327,9 @@ def main():
             label_schedule=label_schedule,
             use_bnn=args.use_bnn,
             use_vi = args.use_vi,
+            bnn_samples = args.num_bnn_samples,
             entropy_alpha = args.entropy_alpha,
+            trajectory_splits = args.trajectory_splits,
             seed=args.seed
         )
 

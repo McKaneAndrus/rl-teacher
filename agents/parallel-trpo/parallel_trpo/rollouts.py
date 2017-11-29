@@ -131,12 +131,13 @@ class ParallelRollout(object):
         start_time = time()
         # keep 20,000 timesteps per update  TODO OLD
         num_rollouts = int(timesteps / self.average_timesteps_in_episode)
+        traj_size = int(self.average_timesteps_in_episode / self.predictor.trajectory_splits)
 
         for _ in range(num_rollouts):
             self.tasks_q.put("do_rollout")
         self.tasks_q.join()
 
-        paths, mean_rewards = [], []
+        paths, mean_rewards, rollout_trajs = [], [], []
         for _ in range(num_rollouts):
             path = self.results_q.get()
             path["original_rewards"] = path["rewards"]
@@ -144,15 +145,28 @@ class ParallelRollout(object):
             self.predictor.path_callback(path)
             paths.append(path)
             if self.predictor.use_entropy:
-                mean_rewards += [path["rewards"].mean()]
+                path_len = len(path["rewards"])
+                num_trajs = int(path_len/traj_size)
+                num_trajs += 0 if path_len % traj_size == 0 else 1
+                rollout_trajs += [num_trajs]
+                for j in range(num_trajs):
+                    mean_rewards += [path["rewards"][j * traj_size : min((j+1) * traj_size, path_len)].mean()]
 
         if self.predictor.use_entropy:
             mean_rewards = np.array(mean_rewards)
+            traj_index = 0
             for i in range(num_rollouts):
-                logits = np.exp(np.stack([np.delete(mean_rewards, i),np.ones(num_rollouts-1) * mean_rewards[i]]))
-                probs = (logits / (np.sum(logits, axis=0)+ 1e-12))
-                average_entropy = (- probs * np.log(probs)).sum(axis=0).mean()
-                paths[i]["rewards"] += self.predictor.entropy_alpha * average_entropy/len(paths[i]["rewards"])
+                for j in range(rollout_trajs[i]):
+                    nc = np.delete(mean_rewards, traj_index)
+                    c = np.ones(len(nc)) * mean_rewards[traj_index]
+                    logits = np.stack([nc,c])
+                    exps = np.exp(logits - np.max(logits,axis=0))
+                    probs = (exps / (np.sum(exps, axis=0)+ 1e-16))
+                    average_entropy = ((- probs * np.log(probs + 1e-16)).sum(axis=0)).mean()
+                    # Add entropy bonus to trajectory
+                    paths[i]["rewards"][j * traj_size : min((j+1) * traj_size, len(paths[i]["rewards"]))] +=\
+                        self.predictor.entropy_alpha * average_entropy/traj_size
+                    traj_index += 1
 
 
         self.average_timesteps_in_episode = sum([len(path["rewards"]) for path in paths]) / len(paths)

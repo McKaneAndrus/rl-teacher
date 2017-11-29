@@ -15,6 +15,7 @@ class SegmentVideoRecorder(object):
         self.save_dir = save_dir
         self.use_entropy = self.predictor.use_entropy
         self.entropy_alpha = self.predictor.entropy_alpha
+        self.trajectory_splits = self.predictor.trajectory_splits
 
         self._num_paths_seen = 0  # Internal counter of how many paths we've seen
         self._counter = 0  # Internal counter of how many videos we've saved at a given iteration.
