@@ -160,7 +160,7 @@ class ParallelRollout(object):
                     nc = np.delete(mean_rewards, traj_index)
                     c = np.ones(len(nc)) * mean_rewards[traj_index]
                     logits = np.stack([nc,c])
-                    exps = np.exp(logits - np.max(logits,axis=0))
+                    exps = np.exp((logits - np.max(logits,axis=0))/self.predictor.softmax_beta)
                     probs = (exps / (np.sum(exps, axis=0)+ 1e-16))
                     average_entropy = ((- probs * np.log(probs + 1e-16)).sum(axis=0)).mean()
                     # Add entropy bonus to trajectory

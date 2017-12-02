@@ -42,14 +42,13 @@ class TraditionalRLRewardPredictor(object):
 class ComparisonRewardPredictor():
     """Predictor that trains a model to predict how much reward is contained in a trajectory segment"""
 
-    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule,
-                 use_bnn, use_vi, bnn_samples, entropy_alpha, trajectory_splits, seed, info_gain_samples):
+    def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn,
+                 bnn_samples, entropy_alpha, softmax_beta, trajectory_splits, info_gain_samples, seed):
         self.summary_writer = summary_writer
         self.agent_logger = agent_logger
         self.comparison_collector = comparison_collector
         self.label_schedule = label_schedule
         self.use_bnn = use_bnn
-        self.use_vi = use_vi
         self.bnn_samples = bnn_samples
         self.use_entropy = entropy_alpha is not None
         if not self.use_entropy:
@@ -57,11 +56,9 @@ class ComparisonRewardPredictor():
         else:
             print("Using entropy-seeking bonuses")
         self.entropy_alpha = entropy_alpha
+        self.softmax_beta = softmax_beta
         self.trajectory_splits = trajectory_splits
-        self.use_info_gain = info_gain_samples is not None
         self.info_gain_samples = info_gain_samples
-        if self.use_info_gain:
-            assert(self.use_bnn)
         self.seed = seed
         random.seed(seed)
 
@@ -147,18 +144,16 @@ class ComparisonRewardPredictor():
 
 
         if self.use_bnn:
-            print("Using BNN")
+            print("Using BNN to generate more efficient queries")
             input_dim = np.prod(self.obs_shape) + np.prod(self.act_shape)
             self.rew_bnn = BNN(input_dim, [64, 64], 1, 10, self.sess, batch_size=1, trans_func=tf.nn.relu,
                                n_samples=self.bnn_samples, out_func=None)
-            self.q_value = self._predict_bnn_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, self.rew_bnn)
-            alt_q_value = self._predict_bnn_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, self.rew_bnn)
-        else:
-            print("Not using BNN")
+            self.bnn_q_value = self._predict_bnn_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, self.rew_bnn)
+            bnn_alt_q_value = self._predict_bnn_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, self.rew_bnn)
             # A vanilla multi-layer perceptron maps a (state, action) pair to a reward (Q-value)
-            mlp = FullyConnectedMLP(self.obs_shape, self.act_shape)
-            self.q_value = self._predict_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, mlp)
-            alt_q_value = self._predict_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, mlp)
+        mlp = FullyConnectedMLP(self.obs_shape, self.act_shape)
+        self.q_value = self._predict_rewards(self.segment_obs_placeholder, self.segment_act_placeholder, mlp)
+        alt_q_value = self._predict_rewards(self.segment_alt_obs_placeholder, self.segment_alt_act_placeholder, mlp)
 
         print("Constructed Reward Model")
 
@@ -167,29 +162,32 @@ class ComparisonRewardPredictor():
         segment_reward_pred_left = tf.reduce_sum(self.q_value, axis=1)
         segment_reward_pred_right = tf.reduce_sum(alt_q_value, axis=1)
         reward_logits = tf.stack([segment_reward_pred_left, segment_reward_pred_right], axis=1)  # (batch_size, 2)
-
-        if self.use_info_gain:
-            segment_reward_mean_left = tf.reduce_mean(self.q_value, axis=1)
-            segment_reward_mean_right = tf.reduce_mean(alt_q_value, axis=1)
-            self.mean_rew_logits = tf.stack([segment_reward_mean_left, segment_reward_mean_right], axis=1)
-            self.softmax_rew = tf.nn.softmax(self.mean_rew_logits)
-
         self.labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="comparison_labels")
+
+
+        if self.use_bnn:
+            segment_reward_bnn_left = tf.reduce_sum(self.bnn_q_value, axis=1)
+            segment_reward_bnn_right = tf.reduce_sum(bnn_alt_q_value, axis=1)
+            segment_reward_mean_left = tf.reduce_mean(self.bnn_q_value, axis=1)
+            segment_reward_mean_right = tf.reduce_mean(bnn_alt_q_value, axis=1)
+            self.mean_rew_logits = tf.stack([segment_reward_bnn_left, segment_reward_bnn_right], axis=1)
+            self.softmax_rew = tf.nn.softmax(self.mean_rew_logits/self.softmax_beta)
+            self.bnn_data_loss = self.rew_bnn.loss(segment_reward_pred_left, segment_reward_pred_right, self.labels)
+            self.bnn_loss_op = tf.reduce_mean(self.bnn_data_loss)
+            self.train_bnn_op = tf.train.AdamOptimizer().minimize(self.bnn_loss_op)
+
+
         # delta = 1e-5f
         # clipped_comparison_labels = tf.clip_by_value(self.comparison_labels, delta, 1.0-delta)
 
-        if self.use_bnn and self.use_vi:
-            print("Using VI to train BNN")
-            self.data_loss = self.rew_bnn.loss(segment_reward_pred_left, segment_reward_pred_right, self.labels)
-        else:
-            self.data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
+        self.data_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=reward_logits, labels=self.labels)
 
         self.loss_op = tf.reduce_mean(self.data_loss)
 
         global_step = tf.Variable(0, name='global_step', trainable=False)
         self.train_op = tf.train.AdamOptimizer().minimize(self.loss_op, global_step=global_step)
 
-        if self.use_info_gain:
+        if self.use_bnn:
             self.plan_labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="plan_labels")
             self.planning_loss = self.rew_bnn.loss_last_sample(segment_reward_mean_left, segment_reward_mean_right,
                                                            self.plan_labels)
@@ -226,7 +224,7 @@ class ComparisonRewardPredictor():
             self.recent_segments.append(segment)
 
         # If we need more comparisons, then we build them from our recent segments
-        if self.use_info_gain:
+        if self.use_bnn:
             best_kl = float("-inf")
             best_a = 0
             best_b = 0
@@ -260,7 +258,7 @@ class ComparisonRewardPredictor():
                             self.plan_labels: [1],
                             K.learning_phase(): False
                             })
-                        rew = self.sess.run([self.softmax_rew],
+                        prob = self.sess.run([self.softmax_rew],
                             feed_dict={
                             self.segment_obs_placeholder: [seg1_obs],
                             self.segment_act_placeholder: [seg1_acts],
@@ -268,8 +266,8 @@ class ComparisonRewardPredictor():
                             self.segment_alt_act_placeholder: [seg2_acts],
                             K.learning_phase(): False
                             })
-                        p1 = rew[0][0][0]
-                        p2 = rew[0][0][1]
+                        p1 = prob[0][0][0]
+                        p2 = prob[0][0][1]
                         kl1 = kl1[0]
                         kl2 = kl2[0]
                         #print("rewards ", p1, p2)
@@ -280,7 +278,7 @@ class ComparisonRewardPredictor():
                             best_kl = kl_val
                             best_a = a
                             best_b = b
-            print("bestKL", best_kl, best_a, best_b)
+            # print("bestKL", best_kl, best_a, best_b)
             segments = [self.recent_segments[best_a], self.recent_segments[best_b]]
         else:
             segments = random.sample(self.recent_segments, 2) if len(self.recent_segments) > 2 else None
@@ -315,11 +313,29 @@ class ComparisonRewardPredictor():
                 K.learning_phase(): True
             })
             self._elapsed_predictor_training_iters += 1
+
+        if self.use_bnn:
+            with self.graph.as_default():
+                _, bnn_loss = self.sess.run([self.train_bnn_op, self.bnn_loss_op], feed_dict={
+                    self.segment_obs_placeholder: left_obs,
+                    self.segment_act_placeholder: left_acts,
+                    self.segment_alt_obs_placeholder: right_obs,
+                    self.segment_alt_act_placeholder: right_acts,
+                    self.labels: labels,
+                    K.learning_phase(): True
+                })
+                self._elapsed_predictor_training_iters += 1
+                self._write_training_summaries(loss, bnn_loss)
+        else:
             self._write_training_summaries(loss)
 
 
-    def _write_training_summaries(self, loss):
+
+
+    def _write_training_summaries(self, loss, bnn_loss=None):
         self.agent_logger.log_simple("predictor/loss", loss)
+        if bnn_loss is not None:
+            self.agent_logger.log_simple("predictor/bnn_loss", bnn_loss)
 
         # Calculate correlation between true and predicted reward by running validation on recent episodes
         recent_paths = self.agent_logger.get_recent_paths_with_padding()
@@ -356,9 +372,9 @@ def main():
     parser.add_argument('-a', '--agent', default="parallel_trpo", type=str)
     parser.add_argument('-i', '--pretrain_iters', default=10000, type=int)
     parser.add_argument('-V', '--no_videos', action="store_true")
-    parser.add_argument('-b', '--use_bnn', default=False, type=bool)
-    parser.add_argument('-vi', '--use_vi', default=True, type=bool)
-    parser.add_argument('-E', '--entropy_alpha', default=None, type=float)
+    parser.add_argument('-b', '--use_bnn', action="store_true")
+    parser.add_argument('-A', '--entropy_alpha', default=None, type=float)
+    parser.add_argument('-B', '--softmax_beta', default=1, type=float)
     parser.add_argument('-nb', '--num_bnn_samples', default=10, type=int)
     parser.add_argument('-ts', '--trajectory_splits', default=10, type=int)
     parser.add_argument('-ig', '--info_gain_samples', default=None, type=int)
@@ -409,9 +425,9 @@ def main():
             agent_logger=agent_logger,
             label_schedule=label_schedule,
             use_bnn=args.use_bnn,
-            use_vi = args.use_vi,
             bnn_samples = args.num_bnn_samples,
             entropy_alpha = args.entropy_alpha,
+            softmax_beta = args.softmax_beta,
             trajectory_splits = args.trajectory_splits,
             info_gain_samples=args.info_gain_samples,
             seed=args.seed
