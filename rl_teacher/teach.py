@@ -3,6 +3,7 @@ import os.path as osp
 import random
 from collections import deque
 from time import time, sleep
+from ast import literal_eval
 
 import numpy as np
 import tensorflow as tf
@@ -19,7 +20,7 @@ from rl_teacher.bnn import BNN
 from rl_teacher.segment_sampling import sample_segment_from_path
 from rl_teacher.segment_sampling import segments_from_rand_rollout
 from rl_teacher.summaries import AgentLogger, make_summary_writer
-from rl_teacher.utils import slugify, corrcoef
+from rl_teacher.utils import slugify, corrcoef, PiecewiseSchedule
 from rl_teacher.video import SegmentVideoRecorder
 
 from tensorflow.python import debug as tf_debug
@@ -43,19 +44,20 @@ class ComparisonRewardPredictor():
     """Predictor that trains a model to predict how much reward is contained in a trajectory segment"""
 
     def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn,
-                 bnn_samples, entropy_alpha, softmax_beta, trajectory_splits, info_gain_samples, seed):
+                 bnn_samples, entropy_alpha, entropy_schedule, softmax_beta, trajectory_splits, info_gain_samples, seed):
         self.summary_writer = summary_writer
         self.agent_logger = agent_logger
         self.comparison_collector = comparison_collector
         self.label_schedule = label_schedule
         self.use_bnn = use_bnn
         self.bnn_samples = bnn_samples
-        self.use_entropy = entropy_alpha is not None
+        self.use_entropy = entropy_alpha is not None or entropy_schedule is not None
         if not self.use_entropy:
             print("Not using entropy-seeking bonuses")
         else:
             print("Using entropy-seeking bonuses")
-        self.entropy_alpha = entropy_alpha
+        self.entropy_alpha = entropy_schedule.value(0) if entropy_schedule is not None else entropy_alpha
+        self.entropy_schedule = entropy_schedule
         self.softmax_beta = softmax_beta
         self.trajectory_splits = trajectory_splits
         self.info_gain_samples = info_gain_samples
@@ -313,6 +315,8 @@ class ComparisonRewardPredictor():
                 K.learning_phase(): True
             })
             self._elapsed_predictor_training_iters += 1
+            if self.entropy_schedule is not None:
+                self.entropy_alpha = self.entropy_schedule.value(self._elapsed_predictor_training_iters)
 
         if self.use_bnn:
             with self.graph.as_default():
@@ -324,7 +328,6 @@ class ComparisonRewardPredictor():
                     self.labels: labels,
                     K.learning_phase(): True
                 })
-                self._elapsed_predictor_training_iters += 1
                 self._write_training_summaries(loss, bnn_loss)
         else:
             self._write_training_summaries(loss)
@@ -368,12 +371,13 @@ def main():
     parser.add_argument('-w', '--workers', default=4, type=int)
     parser.add_argument('-l', '--n_labels', default=None, type=int)
     parser.add_argument('-L', '--pretrain_labels', default=None, type=int)
-    parser.add_argument('-t', '--num_timesteps', default=5e6, type=int)
+    parser.add_argument('-t', '--num_timesteps', default=1e7, type=int)
     parser.add_argument('-a', '--agent', default="parallel_trpo", type=str)
     parser.add_argument('-i', '--pretrain_iters', default=10000, type=int)
     parser.add_argument('-V', '--no_videos', action="store_true")
     parser.add_argument('-b', '--use_bnn', action="store_true")
     parser.add_argument('-A', '--entropy_alpha', default=None, type=float)
+    parser.add_argument('-AS', '--entropy_schedule', default=None, type=str)
     parser.add_argument('-B', '--softmax_beta', default=1, type=float)
     parser.add_argument('-nb', '--num_bnn_samples', default=10, type=int)
     parser.add_argument('-ts', '--trajectory_splits', default=10, type=int)
@@ -390,6 +394,7 @@ def main():
 
     num_timesteps = int(args.num_timesteps)
     experiment_name = slugify(args.name)
+
 
     if args.predictor == "rl":
         predictor = TraditionalRLRewardPredictor(summary_writer)
@@ -418,6 +423,11 @@ def main():
         else:
             raise ValueError("Bad value for --predictor: %s" % args.predictor)
 
+        if args.entropy_schedule is not None:
+            print(literal_eval(args.entropy_schedule))
+            entropy_schedule = PiecewiseSchedule(literal_eval(args.entropy_schedule), outside_value=0)
+        else:
+            entropy_schedule = None
         predictor = ComparisonRewardPredictor(
             env,
             summary_writer,
@@ -427,6 +437,7 @@ def main():
             use_bnn=args.use_bnn,
             bnn_samples = args.num_bnn_samples,
             entropy_alpha = args.entropy_alpha,
+            entropy_schedule=entropy_schedule,
             softmax_beta = args.softmax_beta,
             trajectory_splits = args.trajectory_splits,
             info_gain_samples=args.info_gain_samples,
