@@ -373,7 +373,7 @@ def main():
     parser.add_argument('-L', '--pretrain_labels', default=None, type=int)
     parser.add_argument('-t', '--num_timesteps', default=1e7, type=int)
     parser.add_argument('-a', '--agent', default="parallel_trpo", type=str)
-    parser.add_argument('-i', '--pretrain_iters', default=10000, type=int)
+    parser.add_argument('-i', '--pretrain_iters', default=1000, type=int)
     parser.add_argument('-V', '--no_videos', action="store_true")
     parser.add_argument('-b', '--use_bnn', action="store_true")
     parser.add_argument('-A', '--entropy_alpha', default=None, type=float)
