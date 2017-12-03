@@ -44,21 +44,23 @@ class ComparisonRewardPredictor():
     """Predictor that trains a model to predict how much reward is contained in a trajectory segment"""
 
     def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn,
-                 bnn_samples, entropy_alpha, entropy_schedule, softmax_beta, trajectory_splits, info_gain_samples, seed):
+                 bnn_samples, entropy_alpha, alpha_schedule, softmax_beta, beta_schedule,
+                 trajectory_splits, info_gain_samples, seed):
         self.summary_writer = summary_writer
         self.agent_logger = agent_logger
         self.comparison_collector = comparison_collector
         self.label_schedule = label_schedule
         self.use_bnn = use_bnn
         self.bnn_samples = bnn_samples
-        self.use_entropy = entropy_alpha is not None or entropy_schedule is not None
+        self.use_entropy = entropy_alpha is not None or alpha_schedule is not None
         if not self.use_entropy:
             print("Not using entropy-seeking bonuses")
         else:
             print("Using entropy-seeking bonuses")
-        self.entropy_alpha = entropy_schedule.value(0) if entropy_schedule is not None else entropy_alpha
-        self.entropy_schedule = entropy_schedule
+        self.entropy_alpha = alpha_schedule.value(0) if alpha_schedule is not None else entropy_alpha
+        self.alpha_schedule = alpha_schedule
         self.softmax_beta = softmax_beta
+        self.beta_schedule = beta_schedule
         self.trajectory_splits = trajectory_splits
         self.info_gain_samples = info_gain_samples
         self.seed = seed
@@ -315,8 +317,10 @@ class ComparisonRewardPredictor():
                 K.learning_phase(): True
             })
             self._elapsed_predictor_training_iters += 1
-            if self.entropy_schedule is not None:
-                self.entropy_alpha = self.entropy_schedule.value(self._elapsed_predictor_training_iters)
+            if self.alpha_schedule is not None:
+                self.entropy_alpha = self.alpha_schedule.value(self._elapsed_predictor_training_iters)
+            if self.beta_schedule is not None:
+                self.softmax_beta = self.beta_schedule.value(self._elapsed_predictor_training_iters)
 
         if self.use_bnn:
             with self.graph.as_default():
@@ -377,8 +381,9 @@ def main():
     parser.add_argument('-V', '--no_videos', action="store_true")
     parser.add_argument('-b', '--use_bnn', action="store_true")
     parser.add_argument('-A', '--entropy_alpha', default=None, type=float)
-    parser.add_argument('-AS', '--entropy_schedule', default=None, type=str)
+    parser.add_argument('-As', '--alpha_schedule', default=None, type=str)
     parser.add_argument('-B', '--softmax_beta', default=1, type=float)
+    parser.add_argument('-Bs', '--beta_schedule', default=None, type=str)
     parser.add_argument('-nb', '--num_bnn_samples', default=10, type=int)
     parser.add_argument('-ts', '--trajectory_splits', default=10, type=int)
     parser.add_argument('-ig', '--info_gain_samples', default=None, type=int)
@@ -423,11 +428,17 @@ def main():
         else:
             raise ValueError("Bad value for --predictor: %s" % args.predictor)
 
-        if args.entropy_schedule is not None:
-            print(literal_eval(args.entropy_schedule))
-            entropy_schedule = PiecewiseSchedule(literal_eval(args.entropy_schedule), outside_value=0)
+        if args.alpha_schedule is not None:
+            print(literal_eval(args.alpha_schedule))
+            alpha_schedule = PiecewiseSchedule(literal_eval(args.alpha_schedule), outside_value=0)
         else:
-            entropy_schedule = None
+            alpha_schedule = None
+
+        if args.beta_schedule is not None:
+            print(literal_eval(args.beta_schedule))
+            beta_schedule = PiecewiseSchedule(literal_eval(args.beta_schedule), outside_value=1)
+        else:
+            beta_schedule = None
         predictor = ComparisonRewardPredictor(
             env,
             summary_writer,
@@ -437,8 +448,9 @@ def main():
             use_bnn=args.use_bnn,
             bnn_samples = args.num_bnn_samples,
             entropy_alpha = args.entropy_alpha,
-            entropy_schedule=entropy_schedule,
+            alpha_schedule=alpha_schedule,
             softmax_beta = args.softmax_beta,
+            beta_schedule = beta_schedule,
             trajectory_splits = args.trajectory_splits,
             info_gain_samples=args.info_gain_samples,
             seed=args.seed
