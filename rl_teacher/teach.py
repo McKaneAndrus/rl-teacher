@@ -168,19 +168,6 @@ class ComparisonRewardPredictor():
         reward_logits = tf.stack([segment_reward_pred_left, segment_reward_pred_right], axis=1)  # (batch_size, 2)
         self.labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="comparison_labels")
 
-
-        if self.use_bnn:
-            segment_reward_bnn_left = tf.reduce_sum(self.bnn_q_value, axis=1)
-            segment_reward_bnn_right = tf.reduce_sum(bnn_alt_q_value, axis=1)
-            # segment_reward_mean_left = tf.reduce_mean(self.bnn_q_value, axis=1)
-            # segment_reward_mean_right = tf.reduce_mean(bnn_alt_q_value, axis=1)
-            # self.mean_rew_logits = tf.stack([segment_reward_mean_left, segment_reward_mean_right], axis=1)
-            self.softmax_rew = tf.nn.softmax(reward_logits/self.softmax_beta)
-            self.bnn_data_loss = self.rew_bnn.loss(segment_reward_bnn_left, segment_reward_bnn_right, self.labels)
-            self.bnn_loss_op = tf.reduce_mean(self.bnn_data_loss)
-            self.train_bnn_op = tf.train.AdamOptimizer().minimize(self.bnn_loss_op)
-
-
         # delta = 1e-5f
         # clipped_comparison_labels = tf.clip_by_value(self.comparison_labels, delta, 1.0-delta)
 
@@ -191,13 +178,22 @@ class ComparisonRewardPredictor():
         global_step = tf.Variable(0, name='global_step', trainable=False)
         self.train_op = tf.train.AdamOptimizer().minimize(self.loss_op, global_step=global_step)
 
+
         if self.use_bnn:
+            segment_reward_bnn_left = tf.reduce_sum(self.bnn_q_value, axis=1)
+            segment_reward_bnn_right = tf.reduce_sum(bnn_alt_q_value, axis=1)
+            segment_reward_mean_left = tf.reduce_mean(self.bnn_q_value, axis=1)
+            segment_reward_mean_right = tf.reduce_mean(bnn_alt_q_value, axis=1)
+            # self.mean_rew_logits = tf.stack([segment_reward_mean_left, segment_reward_mean_right], axis=1)
+            self.softmax_rew = tf.nn.softmax(reward_logits/self.softmax_beta)
+            self.bnn_data_loss = self.rew_bnn.loss(segment_reward_bnn_left, segment_reward_bnn_right, self.labels)
+            self.bnn_loss_op = tf.reduce_mean(self.bnn_data_loss)
+            self.train_bnn_op = tf.train.AdamOptimizer().minimize(self.bnn_loss_op)
             self.plan_labels = tf.placeholder(dtype=tf.int32, shape=(None,), name="plan_labels")
             self.planning_loss = self.rew_bnn.loss_last_sample(segment_reward_mean_left, segment_reward_mean_right,
-                                                           self.plan_labels)
+                                                    self.plan_labels)
             self.planning_kl = self.rew_bnn.fast_kl_div(self.planning_loss, self.rew_bnn.get_mus(),
-                                                        self.rew_bnn.get_rhos(), 0.01)
-
+                                                    self.rew_bnn.get_rhos(), 0.01)
 
         print("Constructed Training Ops")
 
