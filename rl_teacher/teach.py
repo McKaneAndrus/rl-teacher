@@ -431,7 +431,7 @@ def main():
             temp = literal_eval(args.alpha_schedule)
             temp = [(0,temp[0][1])] + [(tup[0] + args.pretrain_iters,tup[1]) for tup in temp]
             print(temp)
-            alpha_schedule = PiecewiseSchedule(temp, outside_value=0)
+            alpha_schedule = PiecewiseSchedule(temp, outside_value=temp[-1][1])
         else:
             alpha_schedule = None
 
@@ -440,7 +440,7 @@ def main():
             temp = literal_eval(args.beta_schedule)
             temp = [(0,temp[0][1])] + [(tup[0] + args.pretrain_iters, tup[1]) for tup in temp]
             print(temp)
-            beta_schedule = PiecewiseSchedule(temp, outside_value=1)
+            beta_schedule = PiecewiseSchedule(temp, outside_value=temp[-1][1])
         else:
             beta_schedule = None
         predictor = ComparisonRewardPredictor(
