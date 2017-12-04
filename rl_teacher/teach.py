@@ -225,6 +225,7 @@ class ComparisonRewardPredictor():
 
         # If we need more comparisons, then we build them from our recent segments
         if self.use_bnn:
+            self.rew_bnn.save_params()
             best_kl = float("-inf")
             best_a = 0
             best_b = 0

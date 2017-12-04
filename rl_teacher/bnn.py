@@ -232,6 +232,15 @@ class BNN():
             self.Ws.append(layer.get_W())
             self.bs.append(layer.get_b())
 
+    def save_params(self):
+    	for l in self.layers:
+    		l.save_old_params()
+
+    def kl_div(self):
+    	kls = []
+    	for l in self.layers:
+    		kls.append(l.append(l.kl_div_new_old()))
+    	return tf.reduce_sum(kls)
 
     def loss(self, input1_ph, input2_ph, target):
         # MC samples.
@@ -272,7 +281,7 @@ class BNN():
         log_p_D_given_w = tf.reduce_mean(_log_p_D_given_w)
         # Calculate loss function.
         # self.kl_div() should be zero when taking second order step
-        return - log_p_D_given_w
+        return self.kl_div() - log_p_D_given_w
 
     def build_network(self):
 
