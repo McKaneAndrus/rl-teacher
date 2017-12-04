@@ -316,8 +316,11 @@ class ComparisonRewardPredictor():
             self._elapsed_predictor_training_iters += 1
             if self.alpha_schedule is not None:
                 self.entropy_alpha = self.alpha_schedule.value(self._elapsed_predictor_training_iters)
+                print(self._elapsed_predictor_training_iters, self.entropy_alpha)
+
             if self.beta_schedule is not None:
                 self.softmax_beta = self.beta_schedule.value(self._elapsed_predictor_training_iters)
+                print(self._elapsed_predictor_training_iters, self.softmax_beta)
 
         if self.use_bnn:
             with self.graph.as_default():
@@ -428,7 +431,8 @@ def main():
         if args.alpha_schedule is not None:
             print(literal_eval(args.alpha_schedule))
             temp = literal_eval(args.alpha_schedule)
-            temp = [temp[0]] + [(tup[0] + args.pretrain_iters,tup[1]) for tup in temp[1:]]
+            temp = [(0,temp[0][1])] + [(tup[0] + args.pretrain_iters,tup[1]) for tup in temp]
+            print(temp)
             alpha_schedule = PiecewiseSchedule(temp, outside_value=0)
         else:
             alpha_schedule = None
@@ -436,7 +440,8 @@ def main():
         if args.beta_schedule is not None:
             print(literal_eval(args.beta_schedule))
             temp = literal_eval(args.beta_schedule)
-            temp = [temp[0]] + [(tup[0] + args.pretrain_iters, tup[1]) for tup in temp[1:]]
+            temp = [(0,temp[0][1])] + [(tup[0] + args.pretrain_iters, tup[1]) for tup in temp]
+            print(temp)
             beta_schedule = PiecewiseSchedule(temp, outside_value=1)
         else:
             beta_schedule = None

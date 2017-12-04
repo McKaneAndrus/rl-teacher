@@ -164,6 +164,7 @@ class ParallelRollout(object):
                     probs = (exps / (np.sum(exps, axis=0)+ 1e-16))
                     average_entropy = ((- probs * np.log(probs + 1e-16)).sum(axis=0)).mean()
                     # Add entropy bonus to trajectory
+
                     paths[i]["rewards"][j * traj_size : min((j+1) * traj_size, len(paths[i]["rewards"]))] +=\
                         self.predictor.entropy_alpha * average_entropy/traj_size
                     traj_index += 1

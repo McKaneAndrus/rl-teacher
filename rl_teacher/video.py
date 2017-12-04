@@ -14,8 +14,8 @@ class SegmentVideoRecorder(object):
         self.checkpoint_interval = checkpoint_interval
         self.save_dir = save_dir
         self.use_entropy = self.predictor.use_entropy
-        self.entropy_alpha = self.predictor.entropy_alpha
-        self.softmax_beta = self.predictor.softmax_beta
+        # self.entropy_alpha = self.predictor.entropy_alpha
+        # self.softmax_beta = self.predictor.softmax_beta
         self.trajectory_splits = self.predictor.trajectory_splits
 
         self._num_paths_seen = 0  # Internal counter of how many paths we've seen
@@ -35,6 +35,16 @@ class SegmentVideoRecorder(object):
 
     def predict_loss_reward(self,path,nominal_path):
         return self.predictor.predict_loss_reward(path,nominal_path)
+
+    @property
+    def softmax_beta(self):
+        return self.predictor.softmax_beta
+
+    @property
+    def entropy_alpha(self):
+        return self.predictor.entropy_alpha
+
+
 
 
 def write_segment_to_video(segment, fname, env):
