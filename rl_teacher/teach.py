@@ -316,11 +316,9 @@ class ComparisonRewardPredictor():
             self._elapsed_predictor_training_iters += 1
             if self.alpha_schedule is not None:
                 self.entropy_alpha = self.alpha_schedule.value(self._elapsed_predictor_training_iters)
-                print(self._elapsed_predictor_training_iters, self.entropy_alpha)
 
             if self.beta_schedule is not None:
                 self.softmax_beta = self.beta_schedule.value(self._elapsed_predictor_training_iters)
-                print(self._elapsed_predictor_training_iters, self.softmax_beta)
 
         if self.use_bnn:
             with self.graph.as_default():
