@@ -7,3 +7,8 @@ gcloud compute ssh --ssh-flag="-X" rl-teacher
 	-p synth -l 1400 -e ShortHopper-v1 -n syn-1400 -w 8
 # Tunnel terminal
 ssh -L 8783:localhost:8783 mckane@[35.197.126.56]
+
+
+gcloud compute scp --recurse rl-teacher:/tmp/rl_teacher_vids/ShortHopper-v1/SH_Actual_Default* ~/deeprl/rlteacher/videos/temp/
+
+scp --recurse rl-teacher:~/tb/rl-teacher/ShortHopper-v1/* ~/deeprl/rlteacher/tb/ShortHopper-v1/temp/
