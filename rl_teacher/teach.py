@@ -427,13 +427,17 @@ def main():
 
         if args.alpha_schedule is not None:
             print(literal_eval(args.alpha_schedule))
-            alpha_schedule = PiecewiseSchedule(literal_eval(args.alpha_schedule), outside_value=0)
+            temp = literal_eval(args.alpha_schedule)
+            temp = [temp[0]] + [(tup[0] + args.pretrain_iters,tup[1]) for tup in temp[1:]]
+            alpha_schedule = PiecewiseSchedule(temp, outside_value=0)
         else:
             alpha_schedule = None
 
         if args.beta_schedule is not None:
             print(literal_eval(args.beta_schedule))
-            beta_schedule = PiecewiseSchedule(literal_eval(args.beta_schedule), outside_value=1)
+            temp = literal_eval(args.beta_schedule)
+            temp = [temp[0]] + [(tup[0] + args.pretrain_iters, tup[1]) for tup in temp[1:]]
+            beta_schedule = PiecewiseSchedule(temp, outside_value=1)
         else:
             beta_schedule = None
         predictor = ComparisonRewardPredictor(
