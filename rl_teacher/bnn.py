@@ -8,6 +8,8 @@ from keras import backend as K
 # --------------------
 BNN_LAYER_TAG = 'BNNLayer'
 USE_REPARAMETERIZATION_TRICK = True
+
+
 # --------------------
 
 
@@ -21,18 +23,22 @@ class BNNLayer():
         self.prior_rho = prior_rho
         self.prior_sd = prior_sd
         self.shape = [inputs, outputs]
-        self.scope=scope
+        self.scope = scope
 
         with tf.variable_scope(self.scope):
             self.W = None
             self.b = None
             # Priors
-            self.mu = tf.get_variable("mu", [inputs, outputs], initializer=tf.random_normal_initializer(), dtype=tf.float32, trainable=True)
-            self.rho = tf.get_variable("rho", [inputs, outputs], initializer=tf.constant_initializer(prior_rho), dtype=tf.float32, trainable=True)
+            self.mu = tf.get_variable("mu", [inputs, outputs], initializer=tf.random_normal_initializer(),
+                                      dtype=tf.float32, trainable=True)
+            self.rho = tf.get_variable("rho", [inputs, outputs], initializer=tf.constant_initializer(prior_rho),
+                                       dtype=tf.float32, trainable=True)
 
             # Bias Priors
-            self.b_mu = tf.get_variable("b_mu", [outputs], initializer=tf.random_normal_initializer(), dtype=tf.float32, trainable=True)
-            self.b_rho = tf.get_variable("b_rho", [outputs], initializer=tf.constant_initializer(prior_rho), dtype=tf.float32, trainable=True)
+            self.b_mu = tf.get_variable("b_mu", [outputs], initializer=tf.random_normal_initializer(), dtype=tf.float32,
+                                        trainable=True)
+            self.b_rho = tf.get_variable("b_rho", [outputs], initializer=tf.constant_initializer(prior_rho),
+                                         dtype=tf.float32, trainable=True)
 
             # Backup Params for KL Calculation
 
@@ -47,7 +53,8 @@ class BNNLayer():
             self.b_mu_old = np.zeros(shape=(outputs), dtype=np.float32)
             self.b_rho_old = np.ones(shape=(outputs), dtype=np.float32)
             self.sess.run(tf.global_variables_initializer())
-            self.mu_ary, self.rho_ary, self.b_mu_ary, self.b_rho_ary = self.sess.run([self.mu, self.rho, self.b_mu, self.b_rho])
+            self.mu_ary, self.rho_ary, self.b_mu_ary, self.b_rho_ary = self.sess.run(
+                [self.mu, self.rho, self.b_mu, self.b_rho])
 
     def log_to_std_np(self, rho):
         """Transformation to keep std non negative"""
@@ -55,7 +62,7 @@ class BNNLayer():
 
     def std_to_log_np(self, sigma):
         """Transform back into rho"""
-        return np.log(np.exp(sigma)-1)
+        return np.log(np.exp(sigma) - 1)
 
     def log_to_std(self, rho):
         """Transformation to keep std non negative"""
@@ -63,7 +70,7 @@ class BNNLayer():
 
     def std_to_log(self, sigma):
         """Transform back into rho"""
-        return tf.log(tf.exp(sigma)-1)
+        return tf.log(tf.exp(sigma) - 1)
 
     def get_W_const(self):
         epsilon = np.random.normal(size=self.shape)
@@ -74,7 +81,7 @@ class BNNLayer():
     def get_W(self):
         epsilon = tf.random_normal(shape=self.shape)
         W = self.mu + self.log_to_std(self.rho) * epsilon
-        #W = self.mu
+        # W = self.mu
         self.W = W
         return W
 
@@ -87,7 +94,7 @@ class BNNLayer():
     def get_b(self):
         epsilon = tf.random_normal(shape=[self.num_outputs])
         b = self.b_mu + self.log_to_std(self.b_rho) * epsilon
-        #b = self.b_mu
+        # b = self.b_mu
         self.b = b
         return b
 
@@ -121,14 +128,14 @@ class BNNLayer():
         kl_div = self.kl_div_p_q(
             self.mu, self.log_to_std(self.rho), self.mu_old, self.log_to_std(self.rho_old))
         kl_div += self.kl_div_p_q(self.b_mu, self.log_to_std(self.b_rho),
-            self.b_mu_old, self.log_to_std(self.b_rho_old))
+                                  self.b_mu_old, self.log_to_std(self.b_rho_old))
         return kl_div
 
     def kl_div_old_new(self):
         kl_div = self.kl_div_p_q(
             self.mu_old, self.log_to_std(self.rho_old), self.mu, self.log_to_std(self.rho))
         kl_div += self.kl_div_p_q(
-            self.b_mu_old,self.log_to_std(self.b_rho_old), self.b_mu, self.log_to_std(self.b_rho))
+            self.b_mu_old, self.log_to_std(self.b_rho_old), self.b_mu, self.log_to_std(self.b_rho))
         return kl_div
 
     def kl_div_new_prior(self):
@@ -142,12 +149,12 @@ class BNNLayer():
         return kl_div
 
     def kl_div_prior_new(self):
-        kl_div = self.kl_div_p_q(0., self.prior_sd, self.mu,  self.log_to_std(self.rho))
+        kl_div = self.kl_div_p_q(0., self.prior_sd, self.mu, self.log_to_std(self.rho))
         kl_div += self.kl_div_p_q(0., self.prior_sd, self.b_mu, self.log_to_std(self.b_rho))
         return kl_div
 
-class BNN():
 
+class BNN():
     def __init__(self, n_in,
                  n_hidden,
                  n_out,
@@ -233,14 +240,14 @@ class BNN():
             self.bs.append(layer.get_b())
 
     def save_params(self):
-    	for l in self.layers:
-    		l.save_old_params()
+        for l in self.layers:
+            l.save_old_params()
 
     def kl_div(self):
-    	kls = []
-    	for l in self.layers:
-    		kls.append(l.append(l.kl_div_new_old()))
-    	return tf.reduce_sum(kls)
+        kls = []
+        for l in self.layers:
+            kls.append(l.kl_div_new_old())
+        return tf.reduce_sum(kls)
 
     def loss(self, input1_ph, input2_ph, target):
         # MC samples.
@@ -252,7 +259,7 @@ class BNN():
             # Calculate model likelihood log(P(D|w)).
             prob = self.log_prob_label(prediction1, prediction2, target)
             _log_p_D_given_w.append(prob)
-            #self.refresh_weights()
+            # self.refresh_weights()
         log_p_D_given_w = tf.reduce_sum(_log_p_D_given_w)
         # Calculate variational posterior log(q(w)) and prior log(p(w)).
         kl = self.log_p_w_q_w_kl()
@@ -290,17 +297,20 @@ class BNN():
         # Hidden layers
         for i in range(len(self.n_hidden)):
             # Probabilistic layer (1) or deterministic layer (0).
-            name = "layer%d"%i
-            if i==0:
-                l = BNNLayer(self.n_in, self.n_hidden[i], self.sess, scope=name, nonlinearity=self.transf, prior_sd=self.prior_sd)
+            name = "layer%d" % i
+            if i == 0:
+                l = BNNLayer(self.n_in, self.n_hidden[i], self.sess, scope=name, nonlinearity=self.transf,
+                             prior_sd=self.prior_sd)
                 self.layers.append(l)
             else:
-                l = BNNLayer(self.n_hidden[i-1], self.n_hidden[i], self.sess, scope=name, nonlinearity=self.transf, prior_sd=self.prior_sd)
+                l = BNNLayer(self.n_hidden[i - 1], self.n_hidden[i], self.sess, scope=name, nonlinearity=self.transf,
+                             prior_sd=self.prior_sd)
                 self.layers.append(l)
 
         # Output layer
-        name = "layer%s"%"out"
-        l_out = BNNLayer(self.n_hidden[-1], self.n_out, self.sess, scope=name, nonlinearity=self.outf, prior_sd=self.prior_sd)
+        name = "layer%s" % "out"
+        l_out = BNNLayer(self.n_hidden[-1], self.n_out, self.sess, scope=name, nonlinearity=self.outf,
+                         prior_sd=self.prior_sd)
         self.layers.append(l_out)
         self.Ws = []
         self.bs = []
