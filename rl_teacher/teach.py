@@ -45,7 +45,7 @@ class ComparisonRewardPredictor():
 
     def __init__(self, env, summary_writer, comparison_collector, agent_logger, label_schedule, use_bnn,
                  bnn_samples, entropy_alpha, alpha_schedule, softmax_beta, beta_schedule,
-                 trajectory_splits, info_gain_samples, seed):
+                 trajectory_splits, info_gain_samples, random_sample_break, seed):
         self.summary_writer = summary_writer
         self.agent_logger = agent_logger
         self.comparison_collector = comparison_collector
@@ -63,6 +63,7 @@ class ComparisonRewardPredictor():
         self.beta_schedule = beta_schedule
         self.trajectory_splits = trajectory_splits
         self.info_gain_samples = info_gain_samples
+        self.random_sample_break = random_sample_break if random_sample_break is not None else float('inf')
         self.seed = seed
         random.seed(seed)
 
@@ -224,7 +225,7 @@ class ComparisonRewardPredictor():
             self.recent_segments.append(segment)
 
         # If we need more comparisons, then we build them from our recent segments
-        if self.use_bnn:
+        if self.use_bnn and self._elapsed_predictor_training_iters < self.random_sample_break:
             self.rew_bnn.save_params()
             best_kl = float("-inf")
             best_a = 0
@@ -385,6 +386,7 @@ def main():
     parser.add_argument('-nb', '--num_bnn_samples', default=10, type=int)
     parser.add_argument('-ts', '--trajectory_splits', default=10, type=int)
     parser.add_argument('-ig', '--info_gain_samples', default=None, type=int)
+    parser.add_argument('-rsb', '--random_sample_break',default=None,type=int)
     args = parser.parse_args()
 
     print("Setting things up...")
@@ -457,6 +459,7 @@ def main():
             beta_schedule = beta_schedule,
             trajectory_splits = args.trajectory_splits,
             info_gain_samples=args.info_gain_samples,
+            random_sample_break = args.random_sample_break,
             seed=args.seed
         )
 
