@@ -86,6 +86,8 @@ def train_parallel_trpo(
 
         total_elapsed_seconds = time() - start_time
         stats["Total time"] = total_elapsed_seconds
+        ##### HACK #####
+        stats["Predictor iteration"] = predictor.predictor._elapsed_predictor_training_iters
 
         print_stats(stats)
 
