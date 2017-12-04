@@ -88,6 +88,10 @@ def train_parallel_trpo(
         stats["Total time"] = total_elapsed_seconds
         ##### HACK #####
         stats["Predictor iteration"] = predictor.predictor._elapsed_predictor_training_iters
+        if predictor.entropy_alpha is not None:
+            stats["Predictor Entropy Alpha"] = predictor.entropy_alpha
+        if predictor.softmax_beta is not None:
+            stats["Predictor Softmax Beta"] = predictor.softmax_beta
 
         print_stats(stats)
 
